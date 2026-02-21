@@ -11,6 +11,8 @@ const currentChunk = ref<string>('Unknown')
 const currentTick = ref<number>(0)
 const grid = ref<number[][]>([])
 const agents = ref<any[]>([])
+const npcs = ref<any[]>([])
+const floatingEvents = ref<any[]>([])
 
 let abortController: AbortController | null = null
 // lastEventId is tracked by fetchEventSource internally, but we can keep a ref if we need it for UI
@@ -80,8 +82,12 @@ const connectSSE = (chunkId: string = 'demo') => {
           currentChunk.value = data.chunk_id
           currentTick.value = data.tick
           agents.value = data.agents || []
+          npcs.value = data.npcs || []
           if (data.events && data.events.length > 0) {
-            data.events.forEach((ev: any) => addLog(JSON.stringify(ev)))
+            data.events.forEach((ev: any) => {
+              addLog(`[Event] ${ev.type} from ${ev.from || ev.by || 'unknown'}`)
+              handleFloatingEvent(ev)
+            })
           }
         } else if (data.type === 'chunk_transition') {
           addLog(`Agent transition to ${data.payload?.to_chunk_id}`)
@@ -127,6 +133,7 @@ const fetchSnapshot = async (snapshotUrl: string) => {
       if (data.latest_delta) {
         currentTick.value = data.latest_delta.tick
         agents.value = data.latest_delta.agents || []
+        npcs.value = data.latest_delta.npcs || []
       }
     }
   } catch (err: any) {
@@ -134,10 +141,83 @@ const fetchSnapshot = async (snapshotUrl: string) => {
   }
 }
 
-// Quick helper
-const getAgentsAt = (x: number, y: number) => {
-  return agents.value.filter(a => a.x === x && a.y === y)
+const handleFloatingEvent = (ev: any) => {
+  let targetX, targetY, type, text;
+
+  if (ev.type === 'chat') {
+    // Find agent pos
+    const agent = agents.value.find(a => a.id === ev.from) || npcs.value.find(n => n.id === ev.from)
+    if (agent) {
+      targetX = agent.x
+      targetY = agent.y
+    }
+    type = 'chat'
+    text = ev.text
+  } else if (ev.type === 'blocked') {
+    targetX = ev.at?.x
+    targetY = ev.at?.y
+    type = 'blocked'
+    text = 'BLOCKED'
+  }
+
+  if (targetX !== undefined && targetY !== undefined) {
+    const eventId = Date.now() + Math.random()
+    floatingEvents.value.push({
+      id: eventId,
+      x: targetX,
+      y: targetY,
+      type,
+      text
+    })
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+      floatingEvents.value = floatingEvents.value.filter(e => e.id !== eventId)
+    }, 3000)
+  }
 }
+
+// Quick helper
+const getCellWidth = () => 100 / (grid.value[0]?.length || 50);
+const getCellHeight = () => 100 / (grid.value.length || 50);
+
+const handleCellClick = async (x: number, y: number) => {
+  if (!spectatorToken.value) return;
+  addLog(`Requesting move to (${x}, ${y})...`)
+  
+  try {
+    const res = await fetch(`${API_BASE_URL}/v1/dev/agent/move-to`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${spectatorToken.value}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        agent_id: 'debug-agent',
+        x,
+        y
+      })
+    })
+    
+    if (res.ok) {
+      const data = await res.json()
+      if (data.accepted === false) {
+        addLog(`Move rejected: ${data.reason}`)
+        // Show as floating text
+        const eventId = Date.now() + Math.random()
+        floatingEvents.value.push({ id: eventId, x, y, type: 'blocked', text: `REJECTED: ${data.reason}` })
+        setTimeout(() => { floatingEvents.value = floatingEvents.value.filter(e => e.id !== eventId) }, 3000)
+      } else {
+        addLog(`Move to (${x}, ${y}) accepted.`)
+      }
+    } else {
+      addLog(`Move request failed: ${res.status}`)
+    }
+  } catch (err: any) {
+    addLog(`Error moving: ${err?.message}`)
+  }
+}
+
 
 
 const initSpectatorSession = async () => {
@@ -193,9 +273,33 @@ onUnmounted(() => {
           <div v-for="(row, y) in grid" :key="`row-${y}`" class="grid-row">
             <div v-for="(cell, x) in row" :key="`cell-${x}-${y}`" 
                  class="grid-cell" 
-                 :class="{ 'wall': cell === 1, 'empty': cell === 0 }">
-                 <div v-if="getAgentsAt(x, y).length > 0" class="agent-marker"></div>
+                 :class="{ 'wall': cell === 1, 'empty': cell === 0 }"
+                 @click="handleCellClick(x, y)">
             </div>
+          </div>
+          
+          <!-- Dynamic NPC Layer (Absolute Positioning, below Agents) -->
+          <div v-for="npc in npcs" :key="npc.id" 
+               class="agent-marker npc-marker"
+               :style="{ left: `${npc.x * getCellWidth()}%`, top: `${npc.y * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
+            <div class="agent-sprite npc-sprite"></div>
+            <span class="agent-name npc-name">{{ npc.name || npc.id.substring(0,4) }}</span>
+          </div>
+
+          <!-- Dynamic Agents Layer (Absolute Positioning) -->
+          <div v-for="agent in agents" :key="agent.id" 
+               class="agent-marker"
+               :style="{ left: `${agent.x * getCellWidth()}%`, top: `${agent.y * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
+            <div class="agent-sprite"></div>
+            <span class="agent-name">{{ agent.name || agent.id.substring(0,4) }}</span>
+          </div>
+
+          <!-- Dynamic Events Layer (Absolute Positioning) -->
+          <div v-for="ev in floatingEvents" :key="ev.id"
+               class="floating-event"
+               :class="ev.type"
+               :style="{ left: `${ev.x * getCellWidth()}%`, top: `${ev.y * getCellHeight()}%` }">
+            {{ ev.text }}
           </div>
         </div>
         <div v-else class="placeholder-map">
@@ -329,6 +433,10 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+}
+.grid-cell:hover {
+  background-color: rgba(255,255,255,0.1);
 }
 .grid-cell.wall {
   background-color: #2d313f;
@@ -336,18 +444,92 @@ onUnmounted(() => {
 .grid-cell.empty {
   background-color: transparent;
 }
+
+/* Agent & NPC rendering layer */
 .agent-marker {
-  width: 80%;
-  height: 80%;
+  position: absolute;
+  transition: left 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), top 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+}
+.npc-marker {
+  z-index: 9; /* Render below agents if on same cell */
+}
+.agent-sprite {
+  width: 70%;
+  height: 70%;
   background-color: #00d2ff;
   border-radius: 50%;
-  box-shadow: 0 0 8px rgba(0, 210, 255, 0.8);
-  animation: float 2s ease-in-out infinite;
-  z-index: 10;
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.6);
+  animation: float 2s ease-in-out infinite, pulse-glow 2s infinite alternate;
 }
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10%); }
+.npc-sprite {
+  background-color: #00ff88;
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.6);
+  border-radius: 20%; /* different shape for npc */
+  animation: float 2.5s ease-in-out infinite alternate;
+}
+.agent-name {
+  position: absolute;
+  top: -15px;
+  background: rgba(0,0,0,0.6);
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: bold;
+  white-space: nowrap;
+}
+.npc-name {
+  color: #00ff88;
+}
+
+/* Floating Events */
+.floating-event {
+  position: absolute;
+  z-index: 20;
+  transform: translate(-50%, -100%);
+  margin-top: -10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  white-space: nowrap;
+  animation: float-up 3s forwards;
+  pointer-events: none;
+}
+.floating-event.chat {
+  background-color: #fff;
+  color: #000;
+  border: 1px solid #ccc;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+.floating-event.chat::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 50%; transform: translateX(-50%);
+  border-width: 4px 4px 0; border-style: solid;
+  border-color: #fff transparent transparent;
+}
+.floating-event.blocked {
+  background-color: #ff3366;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(255, 51, 102, 0.8);
+}
+
+@keyframes pulse-glow {
+  from { box-shadow: 0 0 5px rgba(0, 210, 255, 0.4); }
+  to { box-shadow: 0 0 15px rgba(0, 210, 255, 1); }
+}
+@keyframes float-up {
+  0% { transform: translate(-50%, -10px); opacity: 0; }
+  10% { transform: translate(-50%, -20px); opacity: 1; }
+  80% { transform: translate(-50%, -40px); opacity: 1; }
+  100% { transform: translate(-50%, -50px); opacity: 0; }
 }
 
 .placeholder-map {

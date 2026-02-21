@@ -15,3 +15,7 @@
 - [x] 에이전트 상태 패널 및 이벤트 로그 UI 완성 (완료: `4235f3d`)
 - [x] 시각적 피드백 개선 (이동, 충돌 등 모션 처리) (완료: `4235f3d`)
 - [x] Spectator API 라우팅 규약 준수 및 Dev 세션 토큰 발급 (완료: `463fbbc`)
+
+## Sprint 4: Render MVP & Debug Tools
+- [x] 데모 청크 렌더 규약 준수 (floor, wall, user, npc 오버레이 적용)
+- [x] 개발용 디버그 클릭 이동 기능 구현 (`POST /v1/dev/agent/move-to`) 및 에러 UI 표시
