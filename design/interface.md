@@ -1,0 +1,467 @@
+# Interface Specification (Backend-first)
+
+> Status: Draft v0.1  
+> Scope: Backend contracts for Agent(MUD) and Spectator(MUG) clients  
+> Priority: Agent WS control path + Spectator SSE/WS broadcast path
+
+---
+
+## 1. Purpose
+
+이 문서는 `design/architecture.md`, `design/index.md`, `design/planning.md`를 기준으로 구현 가능한 인터페이스 계약을 고정한다.
+
+- 프론트엔드 UI 구현 자체는 범위 밖이다.
+- 백엔드가 제공해야 하는 API/WS/SSE 계약과 서버 내부 인터페이스를 정의한다.
+- Agent/Frontend 모두 같은 canonical world event를 소비하도록 설계한다.
+
+---
+
+## 2. Interface Surface
+
+### 2.1 External Endpoints
+
+| Plane | Protocol | Endpoint | Direction | Auth Scope | Notes |
+|---|---|---|---|---|---|
+| Auth | HTTP | `POST /v1/signup` | C -> S | public | 계정 생성 |
+| Auth | HTTP | `POST /v1/keys` | C -> S | account | Agent API Key 발급(해시 저장) |
+| Auth | HTTP | `POST /v1/sessions` | C -> S | api_key | 단기 세션 토큰 발급(`role=agent` 또는 `role=spectator`) |
+| Agent Plane | WS | `GET /v1/agent/ws?agent_id={id}` | Bi-di | `role=agent` | 커맨드/관측/결과 전달 |
+| Spectator Plane | SSE | `GET /v1/spectate/stream?chunk_id={id}` | S -> C | `role=spectator` | 관전자 기본 스트림 |
+| Spectator Plane (opt) | WS | `GET /v1/spectate/ws?chunk_id={id}` | S -> C | `role=spectator` | 네트워크 정책상 SSE 불가 시 대체 |
+| Sync | HTTP | `GET /v1/chunks/{chunk_id}/snapshot` | S -> C | agent/spectator | 리싱크용 정적+동적 스냅샷 |
+
+### 2.2 Transport Strategy
+
+- Agent 제어 입력은 WS만 허용한다.
+- 관전자 기본 채널은 SSE로 고정한다.
+- 모든 실시간 데이터는 `chunk_static` + `chunk_delta` 계약으로 통일한다.
+- Spectator WS를 열더라도 읽기 전용이며 inbound payload는 즉시 무시/차단한다.
+
+---
+
+## 3. Auth, Session, Scope
+
+### 3.1 API Key and Session
+
+- API Key는 DB에 평문 저장하지 않는다(`sha256` + salt/prefix index).
+- 실시간 채널 접속은 반드시 단기 세션 토큰을 사용한다.
+- 권장 세션 TTL: 15분, refresh 허용.
+
+### 3.2 Scope
+
+- `role=agent`
+  - 허용: `command_req`, `command_answer`, `ping`, `say`
+  - 차단: spectator 전용 구독 조작
+- `role=spectator`
+  - 허용: stream 구독
+  - 차단: 모든 state mutation
+
+### 3.3 Trace Fields
+
+모든 응답/이벤트 payload에 다음 공통 필드를 권장한다.
+
+- `trace_id: string` - 요청/이벤트 상관관계 추적
+- `server_ts_ms: int` - 서버 타임스탬프(epoch ms)
+- `chunk_id: string | null` - chunk 스코프 이벤트일 경우 필수
+
+---
+
+## 4. Agent WebSocket Contract
+
+### 4.1 Connection
+
+- URL: `GET /v1/agent/ws?agent_id={agent_id}`
+- Header: `Authorization: Bearer <session_token>`
+- 서버는 연결 직후 현재 상태를 동기화한다.
+  - `session_ready`
+  - `chunk_static` (현재 청크)
+  - 최신 `chunk_delta` 또는 heartbeat
+
+### 4.2 Envelope
+
+모든 WS 메시지는 아래 envelope를 기본으로 사용한다.
+
+```json
+{
+  "type": "command_req",
+  "trace_id": "trc_01J...",
+  "server_ts_ms": 1760000000000,
+  "payload": {}
+}
+```
+
+### 4.3 Command Handshake (Required)
+
+`command_req -> command_challenge -> command_answer -> command_ack -> command_result`
+
+1) `command_req` (Client -> Server)
+```json
+{
+  "type": "command_req",
+  "payload": {
+    "client_cmd_id": "c-123",
+    "cmd": { "type": "move_to", "x": 12, "y": 41 }
+  }
+}
+```
+
+2) `command_challenge` (Server -> Client)
+```json
+{
+  "type": "command_challenge",
+  "payload": {
+    "client_cmd_id": "c-123",
+    "server_cmd_id": "s-9f2",
+    "nonce": "base64...",
+    "expires_at": 1760000005,
+    "difficulty": 2,
+    "channel_id": "ws-7f2d",
+    "sig_alg": "HMAC-SHA256",
+    "pow_alg": "sha256-leading-hex-zeroes"
+  }
+}
+```
+
+3) `command_answer` (Client -> Server)
+```json
+{
+  "type": "command_answer",
+  "payload": {
+    "server_cmd_id": "s-9f2",
+    "sig": "hmac(base64...)",
+    "proof": {
+      "proof_nonce": "18446744073709551615",
+      "pow_hash": "000a6f..."
+    }
+  }
+}
+```
+
+challenge 세부 전략은 `/Users/songchihyun/repos/prj_dungeonclaw/design/challenge-strategy.md`를 기준으로 구현한다.
+
+4) `command_ack` (Server -> Client)
+```json
+{
+  "type": "command_ack",
+  "payload": {
+    "server_cmd_id": "s-9f2",
+    "accepted": true,
+    "echo": { "type": "move_to", "x": 12, "y": 41 },
+    "started_tick": 3812
+  }
+}
+```
+
+5) `command_result` (Server -> Client)
+```json
+{
+  "type": "command_result",
+  "payload": {
+    "server_cmd_id": "s-9f2",
+    "status": "failed",
+    "reason": "blocked",
+    "ended_tick": 3817,
+    "blocked_at": { "x": 7, "y": 20 },
+    "blocker": { "id": "agent-77", "name": "Bob", "x": 7, "y": 20 }
+  }
+}
+```
+
+### 4.4 Command Types
+
+- `move_to`
+  - input: `x:int[0..49]`, `y:int[0..49]`
+  - rule: 서버 A* 계산 후 틱 엔진이 1 tick당 1 cell 진행
+- `say`
+  - input: `text:string(1..200)`
+  - scope: 현재 chunk
+  - rate: 기본 2초당 1회
+
+### 4.5 Rejection Reasons (`command_ack.accepted=false`)
+
+- `auth_failed`
+- `expired_challenge`
+- `busy` (agent당 in-flight 1개 제한)
+- `out_of_bounds`
+- `invalid_cmd`
+- `rate_limited`
+- `unreachable` (초기 경로 없음)
+
+### 4.6 Server Push Event Types
+
+- `session_ready`
+- `chunk_static`
+- `chunk_delta`
+- `chunk_transition`
+- `command_challenge`
+- `command_ack`
+- `command_result`
+- `error`
+- `heartbeat`
+
+### 4.7 Keepalive
+
+- 서버는 15초마다 `heartbeat` 송신
+- 클라이언트는 30초 무수신 시 재접속
+
+### 4.8 Chunk Transition Delivery
+
+에이전트가 경계 이동으로 청크를 넘어갈 때, 서버 송신 순서를 고정한다.
+
+1. `chunk_transition`
+2. 대상 청크 `chunk_static`
+3. 같은 tick 또는 다음 tick부터 `chunk_delta`
+
+`chunk_transition` 예시:
+
+```json
+{
+  "type": "chunk_transition",
+  "payload": {
+    "agent_id": "me",
+    "from_chunk_id": "chunk-abc",
+    "to_chunk_id": "chunk-def",
+    "from": { "x": 49, "y": 18 },
+    "to": { "x": 0, "y": 18 },
+    "tick": 3815
+  }
+}
+```
+
+---
+
+## 5. Spectator SSE Contract
+
+### 5.1 Request
+
+- URL: `GET /v1/spectate/stream?chunk_id={chunk_id}`
+- Header: `Authorization: Bearer <session_token>` (필수, `role=spectator`)
+- `Last-Event-ID`를 지원하여 재연결 시 replay 시도
+
+### 5.2 Event Stream Order
+
+초기 접속 시:
+
+1) `event: session_ready`
+2) `event: chunk_static`
+3) `event: chunk_delta` (tick 증가 순)
+4) 주기적 `event: heartbeat`
+
+스트림 중간 이벤트:
+
+- `event: chunk_delta`
+- `event: chat`
+- `event: blocked`
+- `event: chunk_closed` (GC 또는 권한/가시 범위 변경으로 스트림 종료 예정)
+
+### 5.3 SSE Frame Example
+
+```text
+id: chunk-abc:3814:0001
+event: chunk_delta
+data: {"chunk_id":"chunk-abc","tick":3814,"agents":[{"id":"a1","x":3,"y":5}],"events":[]}
+
+```
+
+### 5.4 Replay and Resync
+
+- 서버는 chunk별 최근 N tick ring buffer를 유지한다(권장 300 tick, 약 60초).
+- `Last-Event-ID`가 버퍼 범위 내면 누락분 재전송.
+- 범위를 벗어나면 아래 이벤트 전송 후 snapshot endpoint 안내:
+
+```json
+{
+  "type": "resync_required",
+  "chunk_id": "chunk-abc",
+  "snapshot_url": "/v1/chunks/chunk-abc/snapshot"
+}
+```
+
+Event ID 포맷:
+
+- `{chunk_id}:{tick}:{seq}`
+- 같은 tick에서 다수 이벤트 발생 시 `seq` 증가
+- replay는 `(tick, seq)` 순으로 엄격 정렬
+
+### 5.5 Spectator WS Option
+
+- payload 형식은 SSE와 동일하게 유지한다.
+- inbound message는 무시하고, 반복 전송 시 연결 종료한다(`policy_violation`).
+
+---
+
+## 6. Canonical Payload Schemas
+
+### 6.1 `chunk_static`
+
+```json
+{
+  "type": "chunk_static",
+  "chunk_id": "chunk-abc",
+  "size": { "w": 50, "h": 50 },
+  "tiles": ["##################################################", "...50 lines..."],
+  "legend": { "#": "wall", ".": "floor" },
+  "neighbors": { "N": null, "E": "chunk-def", "S": null, "W": null },
+  "tick_base": 3810
+}
+```
+
+Rules:
+- `tiles`는 길이 50 문자열 50개.
+- `neighbors` 키는 `N/E/S/W`만 허용.
+
+### 6.2 `chunk_delta`
+
+```json
+{
+  "type": "chunk_delta",
+  "chunk_id": "chunk-abc",
+  "tick": 3814,
+  "agents": [
+    { "id": "me", "x": 10, "y": 11, "status": {} },
+    { "id": "agent-77", "x": 7, "y": 20, "name": "Bob" }
+  ],
+  "patches": [
+    { "x": 10, "y": 10, "ch": "." },
+    { "x": 10, "y": 11, "ch": "@" }
+  ],
+  "events": [
+    { "type": "chat", "scope": "chunk", "from": "agent-77", "text": "비켜!!" },
+    { "type": "blocked", "by": "agent-77", "at": { "x": 7, "y": 20 } }
+  ],
+  "my_command": {
+    "server_cmd_id": "s-9f2",
+    "state": "executing",
+    "progress": 12,
+    "target": { "x": 12, "y": 41 }
+  }
+}
+```
+
+Rules:
+- `tick`은 chunk 단위 단조 증가.
+- `agents`는 delta 시점의 authoritative 좌표 스냅샷.
+- `patches`는 optional 최적화 필드.
+
+### 6.3 Event Normalization
+
+- 채팅 텍스트는 단일 라인으로 정규화.
+- 제어문자 제거 후 저장/전파.
+- 정책 위반 텍스트는 `text="[redacted]"`로 치환 가능.
+
+---
+
+## 7. Backend Internal Interfaces
+
+구현 시 서비스 분리를 위한 내부 계약이다.
+
+### 7.1 `CommandCoordinator`
+
+- `request(agent_id, client_cmd_id, cmd) -> challenge`
+- `answer(agent_id, server_cmd_id, sig, proof) -> ack`
+- `fail(server_cmd_id, reason, meta) -> result`
+- `complete(server_cmd_id) -> result`
+
+### 7.2 `TickEngine`
+
+- `tick_once(now_ms) -> list[ChunkDelta]`
+- 실행 순서:
+  1. 신규 승인 커맨드 executing 승격(FIFO)
+  2. executing 이동 1step 시도
+  3. 막힘 즉시 실패 처리
+  4. 경계 이동 원자 처리(필요 시 neighbor 생성)
+  5. delta/event 생성
+
+### 7.3 `ChunkDirectory`
+
+- `get(chunk_id) -> Chunk | None`
+- `get_or_create_neighbor(src_chunk_id, dir) -> chunk_id`
+- `unlink_for_gc(chunk_id) -> None`
+- `gc_candidates(now_ms) -> list[chunk_id]`
+
+Lock rule:
+- 멀티 인스턴스 대비 Redis lock key 사용:
+  - `lock:chunk:{src_chunk_id}:dir:{N|E|S|W}`
+
+### 7.4 `Broadcaster`
+
+- `publish(chunk_id, delta_event) -> None`
+- `subscribe_ws(connection, chunk_id, role) -> stream`
+- `subscribe_sse(client_id, chunk_id) -> stream`
+- `replay(chunk_id, from_event_id) -> list[event]`
+
+### 7.5 `SnapshotService`
+
+- `build_chunk_snapshot(chunk_id) -> {chunk_static, latest_delta}`
+- `build_agent_snapshot(agent_id) -> {session_ready, chunk_static, latest_delta}`
+
+---
+
+## 8. Ordering, Atomicity, Determinism
+
+- Tick 단위 authoritative state만 외부로 송신한다.
+- 동일 tick 내 command 처리 순서는 결정적이어야 한다.
+  - 우선: `command_accepted_at` 오름차순
+  - 동률: `agent_id` 오름차순
+- 경계 이동은 원자적으로 처리한다.
+  - 목적지 점유 시 이동 전체 실패(`failed(blocked)`), 원래 좌표 유지
+
+---
+
+## 9. Rate Limit and Backpressure
+
+- Agent command: in-flight 1개
+- Agent chat: 2초당 1회(기본), 200자 제한
+- WS outbound queue 초과 시:
+  - spectator: 오래된 delta drop 가능
+  - agent: drop 금지, 대신 연결 종료 후 재접속 유도
+- SSE가 느린 구독자는 최신 스냅샷 기준으로 리싱크한다.
+
+---
+
+## 10. Observability Contract
+
+필수 메트릭:
+
+- `tick_duration_ms` (p50/p95/p99)
+- `active_chunks`
+- `active_agents`
+- `ws_connections_agent`
+- `sse_connections_spectator`
+- `command_failed_total{reason}`
+- `chunk_gc_total`
+
+필수 로그 필드:
+
+- `trace_id`, `agent_id`, `chunk_id`, `server_cmd_id`, `tick`, `event_id`
+
+---
+
+## 11. Interface Update Policy (Automation Target)
+
+`interface.md` 자동 갱신 시 아래 규칙을 사용한다.
+
+1. `design/architecture.md`, `design/index.md`, `design/planning.md`, `design/challenge-strategy.md` 변경점에서 인터페이스 영향 항목만 추출한다.
+2. 영향이 있는 경우 이 문서의 다음 섹션을 동기화한다.
+   - Endpoint matrix
+   - Agent WS handshake
+   - SSE replay/resync 규칙
+   - Payload schema (`chunk_static`, `chunk_delta`)
+   - Error/reason code 목록
+3. 변경이 없으면 문서는 유지하고, 검토 결과만 남긴다.
+
+---
+
+## 12. Finalized Decisions
+
+- spectator 스트림은 공개 구독을 허용하지 않고, `role=spectator` 토큰을 필수로 한다.
+- chat moderation 정책은 `정규화 + 금칙어 필터 + 3회 위반 시 10분 mute`로 고정한다.
+- 멀티 인스턴스 샤딩 라우팅 키는 `chunk_id` 해시(mod shard_count)로 고정한다.
+- challenge allowlist 예외는 운영하지 않는다(모든 agent 동일 정책 적용).
+
+## Revision
+
+| Date | Author | Summary | Impacted Sections |
+|---|---|---|---|
+| 2026-02-21 | Codex | Agent challenge payload를 channel binding/PoW 명세로 확장하고 전략 문서 참조를 추가 | 1, 4.3, 11, 12 |
+| 2026-02-21 | Codex | 미확정 항목을 토큰 필수/모더레이션/샤딩/allowlist 정책으로 확정 | 2.1, 5.1, 12 |
