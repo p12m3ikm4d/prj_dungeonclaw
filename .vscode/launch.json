@@ -5,6 +5,7 @@
             "name": "Launch Backend (FastAPI)",
             "type": "debugpy",
             "request": "launch",
+            "python": "${config:python.defaultInterpreterPath}",
             "module": "uvicorn",
             "args": [
                 "app.main:app",
