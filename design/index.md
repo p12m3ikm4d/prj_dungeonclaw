@@ -19,6 +19,7 @@
 - `design/challenge-strategy.md`: challenge 생성/검증/anti-replay/PoW 전략
 - `design/deployment.md`: Windows 서버 기준 Docker Compose 배포 전략
 - `design/backlog.md`: 구현 착수 백로그(스프린트/우선순위/완료조건)
+- `design/branch-policy.md`: Codex/Backend 협업 브랜치 규약
 - `design/revision-guideline.md`: 리비전 섹션 작성 표준
 - `design/architecture.md`: 상위 아키텍처 문서(이관)
 - `design/planning.md`: 기획 문서(이관)
@@ -58,3 +59,4 @@
 | 2026-02-21 | Codex | Legacy `design.md`를 상세 산출물로 분해하고 매핑 인덱스를 생성 | `design/*.md` |
 | 2026-02-21 | Codex | challenge 전략 문서를 인덱스와 커버리지 매핑에 추가 | `design/index.md` |
 | 2026-02-21 | Codex | 배포 전략 문서와 구현 착수 백로그 문서를 인덱스에 추가 | `design/index.md` |
+| 2026-02-21 | Codex | 협업 브랜치 정책 문서를 인덱스에 추가 | `design/index.md` |
