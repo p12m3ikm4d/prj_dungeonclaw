@@ -16,8 +16,8 @@ const floatingEvents = ref<any[]>([])
 const debugMoveAgentId = ref<string>('demo-player')
 
 // Viewport constants
-const VIEWPORT_W = 10;
-const VIEWPORT_H = 10;
+const VIEWPORT_W = 15;
+const VIEWPORT_H = 15;
 const CHUNK_W = 50;
 const CHUNK_H = 50;
 
@@ -145,10 +145,10 @@ const connectSSE = (chunkId: string = 'demo') => {
             // Player vanished! Infer transition
             const { x, y } = lastKnownPlayerPos.value;
             let nextDir = null;
-            if (x === 49) nextDir = 'E';
-            if (x === 0) nextDir = 'W';
-            if (y === 0) nextDir = 'N';
-            if (y === 49) nextDir = 'S';
+            if (x >= 49) nextDir = 'E';
+            if (x <= 0) nextDir = 'W';
+            if (y <= 0) nextDir = 'N';
+            if (y >= 49) nextDir = 'S';
 
             if (nextDir && neighbors.value[nextDir]) {
               addLog(`Target vanished at edge ${nextDir}. Switching to ${neighbors.value[nextDir]}...`);
@@ -268,6 +268,9 @@ const getCellHeight = () => 100 / VIEWPORT_H;
 
 const handleCellClick = async (x: number, y: number) => {
   if (!spectatorToken.value) return;
+  
+  // Allow clicking 1 tile out of bounds to trigger transitions, but not wildly OOB
+  if (x < -1 || x > CHUNK_W || y < -1 || y > CHUNK_H) return;
   addLog(`Requesting move for [${debugMoveAgentId.value}] to (${x}, ${y})...`)
   
   try {
@@ -398,7 +401,7 @@ onUnmounted(() => {
         <div class="panel-section agent-info">
           <h3>Agent Status</h3>
           <div class="agent-stats" v-if="agents.length > 0">
-            <div v-for="agent in agents" :key="agent.id" class="agent-card">
+            <div v-for="agent in agents" :key="agent.id" class="agent-card" :class="{ 'me': agent.id === debugMoveAgentId }">
               <div class="stat"><span class="label">ID</span><span class="value">{{ agent.id }}</span></div>
               <div class="stat"><span class="label">HP</span><span class="value">{{ agent.hp }}</span></div>
               <div class="stat"><span class="label">Pos</span><span class="value">(x:{{ agent.x }}, y:{{ agent.y }})</span></div>
@@ -407,6 +410,41 @@ onUnmounted(() => {
           <div class="agent-stats empty-state" v-else>
             No agents in this chunk.
           </div>
+        </div>
+
+        <div class="panel-section minimap">
+          <h3>Current Chunk Minimap</h3>
+          <div class="minimap-container" v-if="grid.length > 0">
+            <div class="mini-grid">
+              <div v-for="(row, y) in grid" :key="`m-row-${y}`" class="mini-row">
+                <div v-for="(cell, x) in row" :key="`m-cell-${x}-${y}`"
+                     class="mini-cell"
+                     :class="{'m-wall': cell === 1, 'm-empty': cell === 0}">
+                </div>
+              </div>
+              
+              <!-- Mini NPCs -->
+              <div v-for="npc in npcs" :key="`m-npc-${npc.id}`"
+                   class="mini-npc"
+                   :style="{ left: `${npc.x * 2}%`, top: `${npc.y * 2}%` }"></div>
+
+              <!-- Mini Agents -->
+              <div v-for="agent in agents" :key="`m-agent-${agent.id}`"
+                   class="mini-agent"
+                   :class="{ 'm-player': agent.id === debugMoveAgentId }"
+                   :style="{ left: `${agent.x * 2}%`, top: `${agent.y * 2}%` }"></div>
+                   
+              <!-- Minimap Viewport Outline -->
+              <div class="mini-viewport"
+                   :style="{ 
+                     left: `${viewportBounds.startX * 2}%`, 
+                     top: `${viewportBounds.startY * 2}%`,
+                     width: `${(viewportBounds.endX - viewportBounds.startX + 1) * 2}%`,
+                     height: `${(viewportBounds.endY - viewportBounds.startY + 1) * 2}%`
+                   }"></div>
+            </div>
+          </div>
+          <div class="empty-state" v-else>No chunk data</div>
         </div>
         
         <div class="panel-section event-log">
@@ -670,9 +708,61 @@ onUnmounted(() => {
 }
 .agent-info {
   flex: 0 0 auto;
-  max-height: 40%;
+  max-height: 25%;
   overflow-y: auto;
 }
+.minimap {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+.minimap-container {
+  padding: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.mini-grid {
+  width: 150px;
+  height: 150px; /* 50x50 cells, each is exactly 2% (3px technically) */
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: #111;
+  border: 1px solid #3b4252;
+}
+.mini-row {
+  display: flex;
+  height: 2%; /* 1/50 */
+}
+.mini-cell {
+  width: 2%; /* 1/50 */
+  height: 100%;
+}
+.m-wall { background-color: #2d313f; }
+.m-empty { background-color: transparent; }
+
+.mini-npc, .mini-agent {
+  position: absolute;
+  width: 2%; height: 2%;
+  border-radius: 50%;
+}
+.mini-npc { background-color: #00ff88; z-index: 5; }
+.mini-agent { background-color: #00d2ff; z-index: 10; }
+.mini-agent.m-player {
+  background-color: #ffaa00;
+  box-shadow: 0 0 4px #ffaa00;
+  z-index: 15;
+  transform: scale(2);
+}
+.mini-viewport {
+  position: absolute;
+  border: 1px solid rgba(255,255,255,0.3);
+  background-color: rgba(255,255,255,0.05); /* very faint highlight */
+  pointer-events: none;
+  z-index: 20;
+}
+
 .event-log {
   flex: 1;
   min-height: 0;
@@ -698,6 +788,10 @@ onUnmounted(() => {
   padding: 0.75rem;
   border-radius: 6px;
   border-left: 3px solid #00d2ff;
+}
+.agent-card.me {
+  border-left-color: #ffaa00;
+  background: rgba(255, 170, 0, 0.05);
 }
 .empty-state {
   color: #5c677d;
