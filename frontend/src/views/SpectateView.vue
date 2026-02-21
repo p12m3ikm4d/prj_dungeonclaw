@@ -13,6 +13,7 @@ const grid = ref<number[][]>([])
 const agents = ref<any[]>([])
 const npcs = ref<any[]>([])
 const floatingEvents = ref<any[]>([])
+const debugMoveAgentId = ref<string>('demo-player')
 
 let abortController: AbortController | null = null
 // lastEventId is tracked by fetchEventSource internally, but we can keep a ref if we need it for UI
@@ -77,6 +78,9 @@ const connectSSE = (chunkId: string = 'demo') => {
         } else if (data.type === 'chunk_static') {
           currentChunk.value = data.chunk_id
           grid.value = data.grid || Array(50).fill(Array(50).fill(0))
+          if (data.render_hint?.debug_move_default_agent_id) {
+            debugMoveAgentId.value = data.render_hint.debug_move_default_agent_id
+          }
           addLog(`Loaded static chunk layout [${data.chunk_id}]`)
         } else if (data.type === 'chunk_delta') {
           currentChunk.value = data.chunk_id
@@ -129,6 +133,9 @@ const fetchSnapshot = async (snapshotUrl: string) => {
       if (data.chunk_static) {
         currentChunk.value = data.chunk_static.chunk_id
         grid.value = data.chunk_static.grid || []
+        if (data.chunk_static.render_hint?.debug_move_default_agent_id) {
+          debugMoveAgentId.value = data.chunk_static.render_hint.debug_move_default_agent_id
+        }
       }
       if (data.latest_delta) {
         currentTick.value = data.latest_delta.tick
@@ -183,7 +190,7 @@ const getCellHeight = () => 100 / (grid.value.length || 50);
 
 const handleCellClick = async (x: number, y: number) => {
   if (!spectatorToken.value) return;
-  addLog(`Requesting move to (${x}, ${y})...`)
+  addLog(`Requesting move for [${debugMoveAgentId.value}] to (${x}, ${y})...`)
   
   try {
     const res = await fetch(`${API_BASE_URL}/v1/dev/agent/move-to`, {
@@ -193,7 +200,7 @@ const handleCellClick = async (x: number, y: number) => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        agent_id: 'debug-agent',
+        agent_id: debugMoveAgentId.value,
         x,
         y
       })
