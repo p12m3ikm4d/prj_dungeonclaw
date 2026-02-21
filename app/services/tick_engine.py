@@ -61,12 +61,14 @@ class InMemoryTickEngine:
         width: int = 50,
         height: int = 50,
         chunk_gc_ttl_seconds: int = 60,
+        sse_replay_max_events: int = 300,
         clock: Optional[Callable[[], float]] = None,
     ) -> None:
         self.tick_hz = tick_hz
         self.width = width
         self.height = height
         self.chunk_gc_ttl_seconds = chunk_gc_ttl_seconds
+        self.sse_replay_max_events = max(1, sse_replay_max_events)
         self._clock = clock or time.time
 
         self._tick = 0
@@ -79,10 +81,14 @@ class InMemoryTickEngine:
         self._neighbor_lock_refcnt: Dict[Tuple[str, str], int] = {}
 
         self._listeners: Dict[str, Set[asyncio.Queue]] = {}
+        self._spectator_listeners: Dict[str, Set[asyncio.Queue]] = {}
+        self._spectator_history: Dict[str, Deque[Dict[str, Any]]] = {}
+        self._spectator_seq: Dict[str, int] = {}
 
         root = self._new_chunk("chunk-0", pinned=True)
         self._root_chunk_id = root.chunk_id
         self._chunks: Dict[str, ChunkState] = {root.chunk_id: root}
+        self._ensure_spectator_chunk(root.chunk_id)
 
         self._lock = asyncio.Lock()
         self._task: Optional[asyncio.Task] = None
@@ -90,6 +96,10 @@ class InMemoryTickEngine:
     @property
     def tick(self) -> int:
         return self._tick
+
+    @property
+    def default_chunk_id(self) -> str:
+        return self._root_chunk_id
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -128,6 +138,63 @@ class InMemoryTickEngine:
             listeners.discard(queue)
             if not listeners:
                 self._listeners.pop(agent_id, None)
+
+    async def open_spectator_feed(
+        self,
+        *,
+        chunk_id: str,
+        last_event_id: Optional[str],
+    ) -> Dict[str, Any]:
+        async with self._lock:
+            chunk = self._resolve_chunk(chunk_id=chunk_id, agent_id=None)
+            self._ensure_spectator_chunk(chunk.chunk_id)
+
+            queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+            self._spectator_listeners[chunk.chunk_id].add(queue)
+
+            replay_events, resync_required = self._replay_events_locked(
+                chunk_id=chunk.chunk_id,
+                last_event_id=last_event_id,
+            )
+
+            return {
+                "queue": queue,
+                "chunk_id": chunk.chunk_id,
+                "replay_events": replay_events,
+                "resync_required": resync_required,
+                "chunk_static": self._build_chunk_static_payload(chunk),
+                "chunk_delta": self._build_chunk_delta_payload(chunk, events=[]),
+            }
+
+    async def unregister_spectator_listener(self, chunk_id: str, queue: asyncio.Queue) -> None:
+        async with self._lock:
+            listeners = self._spectator_listeners.get(chunk_id)
+            if not listeners:
+                return
+            listeners.discard(queue)
+            if not listeners:
+                self._spectator_listeners.pop(chunk_id, None)
+
+    async def chunk_snapshot_payload(self, *, chunk_id: str) -> Dict[str, Any]:
+        async with self._lock:
+            chunk = self._resolve_chunk(chunk_id=chunk_id, agent_id=None)
+            static_payload = self._build_chunk_static_payload(chunk)
+
+            latest_delta: Optional[Dict[str, Any]] = None
+            history = self._spectator_history.get(chunk.chunk_id)
+            if history:
+                for event in reversed(history):
+                    if event["event"] == "chunk_delta":
+                        latest_delta = dict(event["data"])
+                        break
+
+            if latest_delta is None:
+                latest_delta = self._build_chunk_delta_payload(chunk, events=[])
+
+            return {
+                "chunk_static": static_payload,
+                "latest_delta": latest_delta,
+            }
 
     async def ensure_agent(self, agent_id: str) -> AgentEntity:
         async with self._lock:
@@ -291,12 +358,7 @@ class InMemoryTickEngine:
     ) -> Dict[str, Any]:
         async with self._lock:
             chunk = self._resolve_chunk(chunk_id=chunk_id, agent_id=agent_id)
-            return {
-                "chunk_id": chunk.chunk_id,
-                "tick": self._tick,
-                "agents": self._agent_snapshots(chunk),
-                "events": list(events or []),
-            }
+            return self._build_chunk_delta_payload(chunk, events=list(events or []))
 
     async def tick_once(self) -> None:
         async with self._lock:
@@ -501,6 +563,15 @@ class InMemoryTickEngine:
             chunk = self._chunks.get(chunk_id)
             if chunk is None:
                 continue
+            self._push_spectator_event(
+                chunk_id=chunk_id,
+                event="chunk_closed",
+                data={
+                    "type": "chunk_closed",
+                    "chunk_id": chunk_id,
+                    "tick": self._tick,
+                },
+            )
             for direction, neighbor_id in list(chunk.neighbors.items()):
                 if neighbor_id is None:
                     continue
@@ -509,6 +580,9 @@ class InMemoryTickEngine:
                     neighbor.neighbors[self.OPPOSITE_DIR[direction]] = None
                 chunk.neighbors[direction] = None
             self._chunks.pop(chunk_id, None)
+            self._spectator_listeners.pop(chunk_id, None)
+            self._spectator_history.pop(chunk_id, None)
+            self._spectator_seq.pop(chunk_id, None)
 
     def _attempt_boundary_transition(
         self,
@@ -587,6 +661,7 @@ class InMemoryTickEngine:
 
             neighbor_chunk = self._new_chunk()
             self._chunks[neighbor_chunk.chunk_id] = neighbor_chunk
+            self._ensure_spectator_chunk(neighbor_chunk.chunk_id)
             source.neighbors[direction] = neighbor_chunk.chunk_id
             neighbor_chunk.neighbors[self.OPPOSITE_DIR[direction]] = source_chunk_id
             return neighbor_chunk.chunk_id
@@ -627,14 +702,118 @@ class InMemoryTickEngine:
         return None
 
     def _emit_chunk_delta(self, chunk: ChunkState, *, events: List[Dict[str, Any]]) -> None:
-        payload = {
+        payload = self._build_chunk_delta_payload(chunk, events=list(events))
+        self._push_spectator_event(
+            chunk_id=chunk.chunk_id,
+            event="chunk_delta",
+            data={
+                "type": "chunk_delta",
+                **payload,
+            },
+        )
+        for agent_id in list(chunk.agents):
+            self._emit_to_agent(agent_id, {"type": "chunk_delta", "payload": payload})
+
+    def _build_chunk_delta_payload(self, chunk: ChunkState, *, events: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return {
             "chunk_id": chunk.chunk_id,
             "tick": self._tick,
             "agents": self._agent_snapshots(chunk),
             "events": list(events),
         }
-        for agent_id in list(chunk.agents):
-            self._emit_to_agent(agent_id, {"type": "chunk_delta", "payload": payload})
+
+    def _ensure_spectator_chunk(self, chunk_id: str) -> None:
+        self._spectator_listeners.setdefault(chunk_id, set())
+        self._spectator_history.setdefault(
+            chunk_id,
+            deque(maxlen=self.sse_replay_max_events),
+        )
+        self._spectator_seq.setdefault(chunk_id, 0)
+
+    def _next_spectator_event_id(self, chunk_id: str, *, tick: int) -> Tuple[str, int]:
+        self._spectator_seq[chunk_id] = self._spectator_seq.get(chunk_id, 0) + 1
+        seq = self._spectator_seq[chunk_id]
+        event_id = f"{chunk_id}:{tick}:{seq:04d}"
+        return event_id, seq
+
+    def _push_spectator_event(self, *, chunk_id: str, event: str, data: Dict[str, Any]) -> None:
+        self._ensure_spectator_chunk(chunk_id)
+        event_id, seq = self._next_spectator_event_id(chunk_id, tick=self._tick)
+        envelope = {
+            "id": event_id,
+            "event": event,
+            "data": dict(data),
+            "tick": self._tick,
+            "seq": seq,
+        }
+        self._spectator_history[chunk_id].append(envelope)
+
+        listeners = self._spectator_listeners.get(chunk_id, set())
+        for queue in listeners:
+            try:
+                queue.put_nowait(
+                    {
+                        "id": envelope["id"],
+                        "event": envelope["event"],
+                        "data": dict(envelope["data"]),
+                    }
+                )
+            except asyncio.QueueFull:
+                pass
+
+    @staticmethod
+    def _parse_event_id(raw: str) -> Optional[Tuple[str, int, int]]:
+        parts = raw.split(":")
+        if len(parts) != 3:
+            return None
+        chunk_id = parts[0]
+        try:
+            tick = int(parts[1])
+            seq = int(parts[2])
+        except ValueError:
+            return None
+        return chunk_id, tick, seq
+
+    def _replay_events_locked(
+        self,
+        *,
+        chunk_id: str,
+        last_event_id: Optional[str],
+    ) -> Tuple[List[Dict[str, Any]], bool]:
+        if not last_event_id:
+            return [], False
+
+        marker = self._parse_event_id(last_event_id.strip())
+        if marker is None:
+            return [], True
+        marker_chunk_id, marker_tick, marker_seq = marker
+        if marker_chunk_id != chunk_id:
+            return [], True
+
+        history = list(self._spectator_history.get(chunk_id, []))
+        if not history:
+            return [], True
+
+        oldest = (int(history[0]["tick"]), int(history[0]["seq"]))
+        newest = (int(history[-1]["tick"]), int(history[-1]["seq"]))
+        marker_key = (marker_tick, marker_seq)
+
+        if marker_key < oldest:
+            return [], True
+
+        if marker_key >= newest:
+            return [], False
+
+        replay = [
+            {
+                "id": str(item["id"]),
+                "event": str(item["event"]),
+                "data": dict(item["data"]),
+            }
+            for item in history
+            if (int(item["tick"]), int(item["seq"])) > marker_key
+        ]
+        return replay, False
 
     def _resolve_chunk(
         self,

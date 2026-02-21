@@ -26,5 +26,6 @@ def build_container(settings: Settings) -> ServiceContainer:
             width=settings.chunk_width,
             height=settings.chunk_height,
             chunk_gc_ttl_seconds=settings.chunk_gc_ttl_seconds,
+            sse_replay_max_events=settings.sse_replay_max_events,
         ),
     )

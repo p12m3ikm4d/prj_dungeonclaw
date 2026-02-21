@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     chunk_width: int = 50
     chunk_height: int = 50
     chunk_gc_ttl_seconds: int = 60
+    sse_replay_max_events: int = 300
+    sse_keepalive_seconds: int = 15
 
     @property
     def dev_spectator_session_enabled(self) -> bool:
