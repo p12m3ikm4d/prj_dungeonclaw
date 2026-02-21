@@ -1,0 +1,18 @@
+# Local environment
+.venv/
+.agent/
+
+# Deployment private data and machine-specific settings
+deploy/private/*
+!deploy/private/.gitkeep
+
+deploy/runtime/*
+!deploy/runtime/.gitkeep
+
+# Local-only deployment overrides
+**/*.local
+
+# Optional local env files
+.env
+.env.*
+!.env.example
