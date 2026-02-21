@@ -1,0 +1,75 @@
+name: dungeonclaw
+
+services:
+  game-api:
+    image: ${APP_IMAGE:-traefik/whoami:v1.11}
+    container_name: dungeonclaw-game-api
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+    networks:
+      - backend
+      - edge
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: dungeonclaw-postgres
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${HOST_DATA_ROOT}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    container_name: dungeonclaw-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    volumes:
+      - ${HOST_DATA_ROOT}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: dungeonclaw-caddy
+    restart: unless-stopped
+    depends_on:
+      - game-api
+    environment:
+      TZ: ${TZ:-UTC}
+      ACME_EMAIL: ${ACME_EMAIL}
+      APP_DOMAIN: ${APP_DOMAIN}
+      APP_UPSTREAM: ${APP_UPSTREAM:-game-api:80}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./private/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${HOST_DATA_ROOT}/caddy_data:/data
+      - ${HOST_DATA_ROOT}/caddy_config:/config
+      - ${HOST_DATA_ROOT}/logs/caddy:/var/log/caddy
+    networks:
+      - backend
+      - edge
+
+networks:
+  backend:
+    driver: bridge
+  edge:
+    driver: bridge
