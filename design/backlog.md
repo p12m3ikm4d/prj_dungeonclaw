@@ -12,7 +12,7 @@
 | Sprint 3 | Done | Boundary + Chunk lifecycle 완료 |
 | Sprint 4 | Done (P0) | Spectator SSE/Replay/Resync 완료, WS fallback은 보류 |
 | Sprint 5 | Planned | 운영 하드닝(rate limit/moderation/ops) |
-| Sprint 6 | In Progress | Owner Spectator stream + Agent 추적 동기화 |
+| Sprint 6 | Done (P0) | owner stream/role 확장/명령 이벤트 추적 구현 완료, WS fallback(P1) 보류 |
 
 ## 0. Progress Snapshot Rule
 
@@ -145,6 +145,7 @@
 
 | Date | Author | Summary | Impacted Sections |
 |---|---|---|---|
+| 2026-02-21 | Codex | Sprint 6 P0 완료 상태와 증적 반영(Owner stream/role/추적 이벤트), P1 잔여 항목 명시 | 0.1, 7 |
 | 2026-02-21 | Codex | 스프린트 상태 스냅샷과 Owner Spectator 구현 스프린트(Sprint 6)를 추가하고 착수 트랙을 명시 | 0.1, 7, 9 |
 | 2026-02-21 | Codex | 설계 완료 이후 구현 착수용 백로그(스프린트/우선순위/완료조건) 작성 | All |
 | 2026-02-21 | Codex | 스프린트 완료 판정 기준을 마일스톤 원장 연동 방식으로 명확화 | 0 |
