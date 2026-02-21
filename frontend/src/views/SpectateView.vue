@@ -94,8 +94,12 @@ const connectSSE = (chunkId: string = 'demo') => {
             })
           }
         } else if (data.type === 'chunk_transition') {
-          addLog(`Agent transition to ${data.payload?.to_chunk_id}`)
-          setTimeout(() => connectSSE(data.payload?.to_chunk_id), 100)
+          if (data.payload?.agent_id === debugMoveAgentId.value) {
+            addLog(`Following [${debugMoveAgentId.value}] to ${data.payload?.to_chunk_id}...`)
+            setTimeout(() => connectSSE(data.payload?.to_chunk_id), 100)
+          } else {
+            addLog(`Agent [${data.payload?.agent_id || 'unknown'}] transitioned to ${data.payload?.to_chunk_id || 'unknown'}`)
+          }
         } else if (data.type === 'resync_required') {
           addLog(`Resync required. Fetching snapshot...`)
           fetchSnapshot(data.snapshot_url)
@@ -296,6 +300,7 @@ onUnmounted(() => {
           <!-- Dynamic Agents Layer (Absolute Positioning) -->
           <div v-for="agent in agents" :key="agent.id" 
                class="agent-marker"
+               :class="{ 'player-marker': agent.id === debugMoveAgentId }"
                :style="{ left: `${agent.x * getCellWidth()}%`, top: `${agent.y * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
             <div class="agent-sprite"></div>
             <span class="agent-name">{{ agent.name || agent.id.substring(0,4) }}</span>
@@ -475,6 +480,13 @@ onUnmounted(() => {
   box-shadow: 0 0 10px rgba(0, 210, 255, 0.6);
   animation: float 2s ease-in-out infinite, pulse-glow 2s infinite alternate;
 }
+.player-marker .agent-sprite {
+  background-color: #ffaa00;
+  box-shadow: 0 0 10px rgba(255, 170, 0, 0.8);
+}
+.player-marker .agent-name {
+  color: #ffaa00;
+}
 .npc-sprite {
   background-color: #00ff88;
   box-shadow: 0 0 10px rgba(0, 255, 136, 0.6);
@@ -553,6 +565,9 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  min-width: 300px;
+  min-height: 0;
+  max-height: 100%;
 }
 .panel-section {
   background-color: #1a1d27;
@@ -564,9 +579,12 @@ onUnmounted(() => {
 }
 .agent-info {
   flex: 0 0 auto;
+  max-height: 40%;
+  overflow-y: auto;
 }
 .event-log {
   flex: 1;
+  min-height: 0;
 }
 .panel-section h3 {
   margin: 0;

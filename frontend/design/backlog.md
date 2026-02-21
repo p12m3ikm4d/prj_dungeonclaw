@@ -19,3 +19,8 @@
 ## Sprint 4: Render MVP & Debug Tools
 - [x] 데모 청크 렌더 규약 준수 (floor, wall, user, npc 오버레이 적용)
 - [x] 개발용 디버그 클릭 이동 기능 구현 (`POST /v1/dev/agent/move-to`) 및 에러 UI 표시
+
+## Sprint 5: Chunk Following & UX Fixes
+- [x] 제어 대상(`debugMoveAgentId`)의 `chunk_transition` 이벤트 추적 및 자동 청크 전환 구현
+- [x] 제어 대상 캐릭터(플레이어)를 시각적으로 구별 (주황색/골드 색상 및 스프라이트 변경)
+- [x] 시스템 로그 컨테이너가 무한히 늘어나는 CSS 레이아웃 버그 수정 (`min-height: 0` 등 스크롤 박스 제어)
