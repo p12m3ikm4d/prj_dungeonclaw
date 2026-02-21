@@ -1,6 +1,5 @@
 # Local environment
 .venv/
-.agent/
 
 # Deployment private data and machine-specific settings
 deploy/private/*
