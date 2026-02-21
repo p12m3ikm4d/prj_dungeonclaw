@@ -13,6 +13,7 @@
 
 | Request ID | Date | Priority | Title | Required Change | Rationale | Acceptance Criteria | Status |
 |---|---|---|---|---|---|---|---|
+| REQ-20260221-001 | 2026-02-21 | P0 | Frontend Dev Server 연동 지원 | 1. CORS `http://localhost:5173` 허용<br>2. 개발용 Auth 우회 또는 테스트용 관전자 토큰 발급 지원 | Vite 로컬 환경에서 API/SSE 호출 시 CORS 에러 발생 예상. 로그인 UI 전 빠른 관전 연동 테스트 필요. | FastAPI `allow_origins`에 로컬 호스트 추가 및 임시 테스트 토큰 적용 | NEW |
 
 ## 상태 정의
 
