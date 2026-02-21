@@ -5,18 +5,26 @@
 ## 1. Branch Roles
 
 - `main`: 보호 브랜치. 직접 개발 금지, PR 병합 전용.
-- `codex/*`: Codex 작업 브랜치.
+- `codex/*`: 백엔드 작업용 AI 에이전트(Codex) 브랜치.
+- `antigravity/*`: 프론트엔드 작업용 AI 에이전트(Antigravity) 브랜치.
 - `backend/*`: 백엔드(사람) 작업 브랜치.
 
 ## 2. Naming Convention
 
-### 2.1 Codex Branch
+### 2.1 Codex Branch (Backend AI)
 
 - 패턴: `codex/<scope>`
 - 예시:
   - `codex/challenge-core`
   - `codex/tick-engine`
-  - `codex/deploy-hardening`
+
+### 2.2 Antigravity Branch (Frontend AI)
+
+- 패턴: `antigravity/<scope>`
+- 예시:
+  - `antigravity/frontend-init`
+  - `antigravity/mug-viewer`
+  - `antigravity/mock-server`
 
 ### 2.2 Backend Branch
 
@@ -65,7 +73,7 @@
 
 ## 8. Final Decisions
 
-- 브랜치 접두어는 `codex/`, `backend/`로 고정한다.
+- 브랜치 접두어는 `codex/`, `antigravity/`, `backend/`로 고정한다.
 - `main`은 병합 전용으로 운영한다.
 - 프론트엔드 연동 요구는 `.agent/FOR_CODEX.md`를 단일 창구로 사용한다.
 
@@ -74,3 +82,4 @@
 | Date | Author | Summary | Impacted Sections |
 |---|---|---|---|
 | 2026-02-21 | Codex | Codex/Backend 협업을 위한 브랜치/커밋/PR/요구사항 연동 규약을 문서화 | All |
+| 2026-02-21 | Antigravity | 프론트엔드 에이전트용 브랜치(`antigravity/*`) 규약 추가 | 1, 2, 8 |
