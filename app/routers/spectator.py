@@ -175,6 +175,103 @@ async def spectate_stream(
     return StreamingResponse(stream(), media_type="text/event-stream", headers=headers)
 
 
+@router.get("/v1/owner/stream")
+async def owner_stream(
+    request: Request,
+    agent_id: str = Query(..., min_length=1),
+) -> StreamingResponse:
+    services = _services(request)
+    token = _extract_bearer_token(request)
+
+    try:
+        services.auth_store.validate_session(token=token, role="owner_spectator", agent_id=agent_id)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    try:
+        await services.tick_engine.ensure_agent(agent_id)
+        static_payload = await services.tick_engine.chunk_static_payload(agent_id=agent_id)
+        delta_payload = await services.tick_engine.chunk_delta_payload(agent_id=agent_id)
+    except TickEngineError as exc:
+        if exc.reason in {"agent_not_found", "chunk_not_found"}:
+            raise HTTPException(status_code=404, detail=exc.reason) from exc
+        raise HTTPException(status_code=400, detail=exc.reason) from exc
+
+    queue = await services.tick_engine.register_owner_listener(agent_id)
+    keepalive = max(5, int(request.app.state.settings.sse_keepalive_seconds))
+    channel_id = f"owner-sse-{secrets.token_hex(4)}"
+    current_chunk_id = str(static_payload.get("chunk_id") or "")
+
+    async def stream() -> AsyncIterator[str]:
+        nonlocal current_chunk_id
+        try:
+            yield _sse_frame(
+                event="session_ready",
+                data={
+                    "type": "session_ready",
+                    "role": "owner_spectator",
+                    "agent_id": agent_id,
+                    "chunk_id": current_chunk_id,
+                    "channel_id": channel_id,
+                },
+            )
+            yield _sse_frame(
+                event="chunk_static",
+                data={
+                    "type": "chunk_static",
+                    **static_payload,
+                },
+            )
+            yield _sse_frame(
+                event="chunk_delta",
+                data={
+                    "type": "chunk_delta",
+                    **delta_payload,
+                },
+            )
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=keepalive)
+                except asyncio.TimeoutError:
+                    yield _sse_frame(
+                        event="heartbeat",
+                        data={
+                            "type": "heartbeat",
+                            "agent_id": agent_id,
+                            "chunk_id": current_chunk_id,
+                            "tick": services.tick_engine.tick,
+                        },
+                    )
+                    continue
+
+                event_name = str(event.get("type", "message"))
+                payload = dict(event.get("payload", {}))
+                if event_name == "chunk_transition":
+                    current_chunk_id = str(payload.get("to_chunk_id") or current_chunk_id)
+                elif event_name in {"chunk_static", "chunk_delta"}:
+                    current_chunk_id = str(payload.get("chunk_id") or current_chunk_id)
+
+                yield _sse_frame(
+                    event=event_name,
+                    data={
+                        "type": event_name,
+                        **payload,
+                    },
+                )
+        finally:
+            await services.tick_engine.unregister_owner_listener(agent_id, queue)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(stream(), media_type="text/event-stream", headers=headers)
+
+
 @router.get("/v1/chunks/{chunk_id}/snapshot")
 @router.get("/api/v1/chunks/{chunk_id}/snapshot", include_in_schema=False)
 async def chunk_snapshot(request: Request, chunk_id: str) -> JSONResponse:
@@ -186,7 +283,7 @@ async def chunk_snapshot(request: Request, chunk_id: str) -> JSONResponse:
         session = services.auth_store.get_session(token)
         if session is None:
             raise HTTPException(status_code=401, detail="invalid_session")
-        if session.role not in {"agent", "spectator"}:
+        if session.role not in {"agent", "owner_spectator", "spectator"}:
             raise HTTPException(status_code=403, detail="invalid_scope")
 
     try:

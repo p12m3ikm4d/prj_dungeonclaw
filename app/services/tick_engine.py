@@ -85,6 +85,7 @@ class InMemoryTickEngine:
         self._neighbor_lock_refcnt: Dict[Tuple[str, str], int] = {}
 
         self._listeners: Dict[str, Set[asyncio.Queue]] = {}
+        self._owner_listeners: Dict[str, Set[asyncio.Queue]] = {}
         self._spectator_listeners: Dict[str, Set[asyncio.Queue]] = {}
         self._spectator_history: Dict[str, Deque[Dict[str, Any]]] = {}
         self._spectator_seq: Dict[str, int] = {}
@@ -146,6 +147,25 @@ class InMemoryTickEngine:
             listeners.discard(queue)
             if not listeners:
                 self._listeners.pop(agent_id, None)
+
+    async def register_owner_listener(self, agent_id: str) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+        async with self._lock:
+            self._owner_listeners.setdefault(agent_id, set()).add(queue)
+        return queue
+
+    async def unregister_owner_listener(self, agent_id: str, queue: asyncio.Queue) -> None:
+        async with self._lock:
+            listeners = self._owner_listeners.get(agent_id)
+            if not listeners:
+                return
+            listeners.discard(queue)
+            if not listeners:
+                self._owner_listeners.pop(agent_id, None)
+
+    async def emit_owner_event(self, agent_id: str, message: Dict[str, Any]) -> None:
+        async with self._lock:
+            self._emit_to_owner(agent_id, message)
 
     async def open_spectator_feed(
         self,
@@ -345,6 +365,18 @@ class InMemoryTickEngine:
                 queue.put_nowait(message)
             except asyncio.QueueFull:
                 pass
+
+    def _emit_to_owner(self, agent_id: str, message: Dict[str, Any]) -> None:
+        listeners = self._owner_listeners.get(agent_id, set())
+        for queue in listeners:
+            try:
+                queue.put_nowait(message)
+            except asyncio.QueueFull:
+                pass
+
+    def _emit_to_agent_and_owner(self, agent_id: str, message: Dict[str, Any]) -> None:
+        self._emit_to_agent(agent_id, message)
+        self._emit_to_owner(agent_id, message)
 
     def _emit_to_all(self, message: Dict[str, Any]) -> None:
         for agent_id in list(self._listeners.keys()):
@@ -624,15 +656,15 @@ class InMemoryTickEngine:
                 }
                 if meta:
                     payload.update(meta)
-                self._emit_to_agent(cmd.agent_id, {"type": "command_result", "payload": payload})
+                self._emit_to_agent_and_owner(cmd.agent_id, {"type": "command_result", "payload": payload})
 
             for agent_id, transition_payload, to_chunk_id in transitions:
-                self._emit_to_agent(
+                self._emit_to_agent_and_owner(
                     agent_id,
                     {"type": "chunk_transition", "payload": transition_payload},
                 )
                 static_payload = self._build_chunk_static_payload(self._chunks[to_chunk_id])
-                self._emit_to_agent(
+                self._emit_to_agent_and_owner(
                     agent_id,
                     {"type": "chunk_static", "payload": static_payload},
                 )
@@ -885,7 +917,7 @@ class InMemoryTickEngine:
             },
         )
         for agent_id in list(chunk.agents):
-            self._emit_to_agent(agent_id, {"type": "chunk_delta", "payload": payload})
+            self._emit_to_agent_and_owner(agent_id, {"type": "chunk_delta", "payload": payload})
 
     def _build_chunk_delta_payload(self, chunk: ChunkState, *, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         agents = self._agent_snapshots(chunk)

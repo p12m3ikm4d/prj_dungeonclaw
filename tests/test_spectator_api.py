@@ -1,4 +1,5 @@
 import unittest
+import uuid
 
 from fastapi.testclient import TestClient
 
@@ -75,6 +76,39 @@ class SpectatorApiTests(unittest.TestCase):
             self.assertEqual(snapshot.status_code, 200)
             payload = snapshot.json()
             self.assertEqual(payload["chunk_static"]["chunk_id"], "chunk-0")
+
+    def test_owner_stream_requires_owner_token(self) -> None:
+        with TestClient(app) as client:
+            response = client.get("/v1/owner/stream?agent_id=demo-player")
+            self.assertEqual(response.status_code, 401)
+
+    def test_snapshot_endpoints_with_owner_session(self) -> None:
+        with TestClient(app) as client:
+            email = f"owner-snap-{uuid.uuid4().hex[:8]}@example.com"
+            signup = client.post("/v1/signup", json={"email": email, "password": "password123"})
+            self.assertEqual(signup.status_code, 200)
+            account_id = signup.json()["account_id"]
+
+            key = client.post("/v1/keys", json={"account_id": account_id, "label": "owner"})
+            self.assertEqual(key.status_code, 200)
+            api_key = key.json()["api_key"]
+
+            session = client.post(
+                "/v1/sessions",
+                json={
+                    "api_key": api_key,
+                    "role": "owner_spectator",
+                    "agent_id": "demo-player",
+                },
+            )
+            self.assertEqual(session.status_code, 200)
+            token = session.json()["session_token"]
+
+            snapshot = client.get(
+                "/v1/chunks/chunk-0/snapshot",
+                headers={"authorization": f"Bearer {token}"},
+            )
+            self.assertEqual(snapshot.status_code, 200)
 
 
 if __name__ == "__main__":

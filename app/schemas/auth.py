@@ -26,16 +26,20 @@ class CreateKeyResponse(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     api_key: str
-    role: Literal["agent", "spectator"]
+    role: Literal["agent", "owner_spectator", "spectator"]
     agent_id: Optional[str] = None
 
 
 class CreateSessionResponse(BaseModel):
     session_token: str
     session_jti: str
-    role: Literal["agent", "spectator"]
+    role: Literal["agent", "owner_spectator", "spectator"]
     cmd_secret: str
     expires_at: int
+
+
+class DevOwnerSessionRequest(BaseModel):
+    agent_id: str = Field(default="demo-player", min_length=1, max_length=128)
 
 
 class DevMoveToRequest(BaseModel):
