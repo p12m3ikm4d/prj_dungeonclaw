@@ -420,6 +420,7 @@ onUnmounted(() => {
   aspect-ratio: 1 / 1;
   background-color: #151822;
   border: 1px solid #3b4252;
+  position: relative; /* Essential for absolute overlay layers */
 }
 .grid-row {
   display: flex;
