@@ -26,14 +26,14 @@ class CreateKeyResponse(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     api_key: str
-    role: Literal["agent", "spectator"]
+    role: Literal["agent", "owner_spectator", "spectator"]
     agent_id: Optional[str] = None
 
 
 class CreateSessionResponse(BaseModel):
     session_token: str
     session_jti: str
-    role: Literal["agent", "spectator"]
+    role: Literal["agent", "owner_spectator", "spectator"]
     cmd_secret: str
     expires_at: int
 

@@ -23,6 +23,26 @@ async def _send(websocket: WebSocket, message_type: str, payload: Dict[str, Any]
     await websocket.send_json({"type": message_type, "payload": payload})
 
 
+async def _send_with_owner_mirror(
+    *,
+    websocket: WebSocket,
+    services: ServiceContainer,
+    agent_id: str,
+    message_type: str,
+    payload: Dict[str, Any],
+    mirror_owner: bool,
+) -> None:
+    await _send(websocket, message_type, payload)
+    if mirror_owner:
+        await services.tick_engine.emit_owner_event(
+            agent_id,
+            {
+                "type": message_type,
+                "payload": dict(payload),
+            },
+        )
+
+
 async def _wait_for_client_or_engine(
     websocket: WebSocket,
     event_queue: asyncio.Queue,
@@ -98,39 +118,48 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
                 req = CommandReqPayload.model_validate(envelope.payload)
 
                 if pending_commands:
-                    await _send(
-                        websocket,
-                        "command_ack",
-                        {
+                    await _send_with_owner_mirror(
+                        websocket=websocket,
+                        services=services,
+                        agent_id=agent_id,
+                        message_type="command_ack",
+                        payload={
                             "server_cmd_id": "",
                             "accepted": False,
                             "reason": "busy",
                         },
+                        mirror_owner=True,
                     )
                     continue
 
                 if await services.tick_engine.has_active_command(agent_id):
-                    await _send(
-                        websocket,
-                        "command_ack",
-                        {
+                    await _send_with_owner_mirror(
+                        websocket=websocket,
+                        services=services,
+                        agent_id=agent_id,
+                        message_type="command_ack",
+                        payload={
                             "server_cmd_id": "",
                             "accepted": False,
                             "reason": "busy",
                         },
+                        mirror_owner=True,
                     )
                     continue
 
                 cmd_type = req.cmd.get("type")
                 if cmd_type not in {"move_to", "say"}:
-                    await _send(
-                        websocket,
-                        "command_ack",
-                        {
+                    await _send_with_owner_mirror(
+                        websocket=websocket,
+                        services=services,
+                        agent_id=agent_id,
+                        message_type="command_ack",
+                        payload={
                             "server_cmd_id": "",
                             "accepted": False,
                             "reason": "invalid_cmd",
                         },
+                        mirror_owner=True,
                     )
                     continue
 
@@ -147,10 +176,12 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
                     "client_cmd_id": req.client_cmd_id,
                 }
 
-                await _send(
-                    websocket,
-                    "command_challenge",
-                    {
+                await _send_with_owner_mirror(
+                    websocket=websocket,
+                    services=services,
+                    agent_id=agent_id,
+                    message_type="command_challenge",
+                    payload={
                         "client_cmd_id": challenge.client_cmd_id,
                         "server_cmd_id": challenge.server_cmd_id,
                         "nonce": challenge.nonce,
@@ -160,6 +191,7 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
                         "sig_alg": "HMAC-SHA256",
                         "pow_alg": "sha256-leading-hex-zeroes",
                     },
+                    mirror_owner=True,
                 )
                 continue
 
@@ -167,14 +199,17 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
                 answer = CommandAnswerPayload.model_validate(envelope.payload)
                 pending = pending_commands.get(answer.server_cmd_id)
                 if pending is None:
-                    await _send(
-                        websocket,
-                        "command_ack",
-                        {
+                    await _send_with_owner_mirror(
+                        websocket=websocket,
+                        services=services,
+                        agent_id=agent_id,
+                        message_type="command_ack",
+                        payload={
                             "server_cmd_id": answer.server_cmd_id,
                             "accepted": False,
                             "reason": "expired_challenge",
                         },
+                        mirror_owner=True,
                     )
                     continue
 
@@ -191,37 +226,46 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
 
                 if not verify.ok:
                     pending_commands.pop(answer.server_cmd_id, None)
-                    await _send(
-                        websocket,
-                        "command_ack",
-                        {
+                    await _send_with_owner_mirror(
+                        websocket=websocket,
+                        services=services,
+                        agent_id=agent_id,
+                        message_type="command_ack",
+                        payload={
                             "server_cmd_id": answer.server_cmd_id,
                             "accepted": False,
                             "reason": verify.reason,
                         },
+                        mirror_owner=True,
                     )
                     continue
 
                 cmd_payload = pending["cmd"]
                 if cmd_payload.get("type") == "say":
-                    await _send(
-                        websocket,
-                        "command_ack",
-                        {
+                    await _send_with_owner_mirror(
+                        websocket=websocket,
+                        services=services,
+                        agent_id=agent_id,
+                        message_type="command_ack",
+                        payload={
                             "server_cmd_id": answer.server_cmd_id,
                             "accepted": True,
                             "echo": cmd_payload,
                             "started_tick": services.tick_engine.tick,
                         },
+                        mirror_owner=True,
                     )
-                    await _send(
-                        websocket,
-                        "command_result",
-                        {
+                    await _send_with_owner_mirror(
+                        websocket=websocket,
+                        services=services,
+                        agent_id=agent_id,
+                        message_type="command_result",
+                        payload={
                             "server_cmd_id": answer.server_cmd_id,
                             "status": "completed",
                             "ended_tick": services.tick_engine.tick,
                         },
+                        mirror_owner=True,
                     )
                     pending_commands.pop(answer.server_cmd_id, None)
                     continue
@@ -235,38 +279,47 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
                     )
                 except (ValueError, TypeError):
                     pending_commands.pop(answer.server_cmd_id, None)
-                    await _send(
-                        websocket,
-                        "command_ack",
-                        {
+                    await _send_with_owner_mirror(
+                        websocket=websocket,
+                        services=services,
+                        agent_id=agent_id,
+                        message_type="command_ack",
+                        payload={
                             "server_cmd_id": answer.server_cmd_id,
                             "accepted": False,
                             "reason": "invalid_cmd",
                         },
+                        mirror_owner=True,
                     )
                     continue
                 except TickEngineError as exc:
                     pending_commands.pop(answer.server_cmd_id, None)
-                    await _send(
-                        websocket,
-                        "command_ack",
-                        {
+                    await _send_with_owner_mirror(
+                        websocket=websocket,
+                        services=services,
+                        agent_id=agent_id,
+                        message_type="command_ack",
+                        payload={
                             "server_cmd_id": answer.server_cmd_id,
                             "accepted": False,
                             "reason": exc.reason,
                         },
+                        mirror_owner=True,
                     )
                     continue
 
-                await _send(
-                    websocket,
-                    "command_ack",
-                    {
+                await _send_with_owner_mirror(
+                    websocket=websocket,
+                    services=services,
+                    agent_id=agent_id,
+                    message_type="command_ack",
+                    payload={
                         "server_cmd_id": answer.server_cmd_id,
                         "accepted": True,
                         "echo": cmd_payload,
                         "started_tick": started_tick,
                     },
+                    mirror_owner=True,
                 )
 
                 pending_commands.pop(answer.server_cmd_id, None)

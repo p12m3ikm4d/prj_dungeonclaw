@@ -90,8 +90,13 @@ class InMemoryAuthStore:
             return api_key, raw_key
 
     def create_session(self, api_key_raw: str, role: str, agent_id: Optional[str]) -> Session:
-        if role == "agent" and not agent_id:
+        if role not in {"agent", "owner_spectator", "spectator"}:
+            raise AuthError("invalid_scope")
+
+        if role in {"agent", "owner_spectator"} and not agent_id:
             raise AuthError("agent_id_required")
+        if role == "spectator":
+            agent_id = None
 
         api_key_hash = self._hash_raw(api_key_raw)
         with self._lock:
@@ -145,7 +150,7 @@ class InMemoryAuthStore:
             raise AuthError("invalid_session")
         if session.role != role:
             raise AuthError("invalid_scope")
-        if role == "agent" and session.agent_id != agent_id:
+        if role in {"agent", "owner_spectator"} and session.agent_id != agent_id:
             raise AuthError("agent_mismatch")
         return session
 
