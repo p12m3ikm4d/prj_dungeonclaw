@@ -1,6 +1,6 @@
 # OpenClaw Agent Guide (DungeonClaw)
 
-이 문서는 `/Users/songchihyun/repos/prj_dungeonclaw`에서 OpenClaw 에이전트가 일관되게 작업하기 위한 실행 가이드다.
+이 문서는 프로젝트 루트(`.`)에서 OpenClaw 에이전트가 일관되게 작업하기 위한 실행 가이드다.
 
 ## 1. 목표와 작업 범위
 
@@ -12,19 +12,19 @@
 
 최소 아래 문서를 먼저 읽고 작업을 시작한다.
 
-1. `/Users/songchihyun/repos/prj_dungeonclaw/README.md`
-2. `/Users/songchihyun/repos/prj_dungeonclaw/design/interface.md`
-3. `/Users/songchihyun/repos/prj_dungeonclaw/design/protocol.md`
-4. `/Users/songchihyun/repos/prj_dungeonclaw/design/simulation.md`
-5. `/Users/songchihyun/repos/prj_dungeonclaw/design/component.md`
-6. `/Users/songchihyun/repos/prj_dungeonclaw/design/backlog.md`
+1. `./README.md`
+2. `./design/interface.md`
+3. `./design/protocol.md`
+4. `./design/simulation.md`
+5. `./design/component.md`
+6. `./design/backlog.md`
 
 ## 3. 핵심 개발 원칙
 
 - 서버가 authoritative state를 가진다. 프론트엔드는 관전(read-only) 원칙을 지킨다.
 - 외부 계약(API/WS/SSE) 변경이 필요하면 코드보다 먼저 `design/interface.md`를 갱신한다.
 - 스키마/이벤트 필드는 추측하지 않는다. 불명확하면 요구사항으로 기록한다.
-- 프론트엔드에서 백엔드 변경이 필요하면 `/Users/songchihyun/repos/prj_dungeonclaw/.agent/FOR_CODEX.md`에 요청을 남긴다.
+- 프론트엔드에서 백엔드 변경이 필요하면 `./.agent/FOR_CODEX.md`에 요청을 남긴다.
 
 ## 4. 구현/검증 기본 루틴
 
@@ -36,7 +36,7 @@
 기본 명령 예시:
 
 ```bash
-cd /Users/songchihyun/repos/prj_dungeonclaw
+cd ./
 source .venv/bin/activate
 pytest -q
 ```
@@ -49,6 +49,6 @@ pytest -q
 
 ## 6. OpenClaw Skills 연동 원칙
 
-- 프로젝트 로컬 스킬은 `/Users/songchihyun/repos/prj_dungeonclaw/skills`에 둔다.
+- 프로젝트 로컬 스킬은 `./skills`에 둔다.
 - 동일 이름 충돌 시 workspace 스킬이 우선된다.
-- 스킬 구조/형식은 `/Users/songchihyun/repos/prj_dungeonclaw/openclaw/SKILLS.md`를 따른다.
+- 스킬 구조/형식은 `./openclaw/SKILLS.md`를 따른다.

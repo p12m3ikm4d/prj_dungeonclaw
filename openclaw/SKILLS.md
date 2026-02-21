@@ -27,7 +27,7 @@ metadata: {"openclaw":{"requires":{"bins":["rg"]}}}
 Use this skill when the user asks for contract-safe implementation.
 
 # Steps
-1. Read `/Users/songchihyun/repos/prj_dungeonclaw/design/interface.md`.
+1. Read `./design/interface.md`.
 2. Diff proposed changes against the interface contract.
 3. Apply minimal edits and run tests.
 ```
@@ -61,7 +61,7 @@ OpenClaw는 아래 순서로 스킬을 로드한다.
 
 ## 5. 스킬 생성 절차
 
-1. `/Users/songchihyun/repos/prj_dungeonclaw/skills/<skill-name>/SKILL.md` 생성
+1. `./skills/<skill-name>/SKILL.md` 생성
 2. frontmatter(`name`, `description`) 작성
 3. 필요 시 `metadata.openclaw.requires`로 환경/bin 조건 선언
 4. 샘플 요청으로 동작 확인

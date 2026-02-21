@@ -49,6 +49,38 @@ class ApiWsFlowTests(unittest.TestCase):
         finally:
             app.state.settings.enable_dev_spectator_session = original
 
+    def test_dev_agent_move_to_without_challenge(self) -> None:
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/dev/agent/move-to",
+                headers={"authorization": "Bearer test-spectator-token"},
+                json={"agent_id": "debug-agent", "x": 3, "y": 1},
+            )
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertTrue(payload["accepted"])
+            self.assertTrue(payload["server_cmd_id"].startswith("dev-"))
+            self.assertGreaterEqual(payload["started_tick"], 1)
+
+    def test_dev_agent_move_to_legacy_alias(self) -> None:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/dev/agent/move-to",
+                headers={"authorization": "Bearer test-spectator-token"},
+                json={"agent_id": "debug-agent", "x": 3, "y": 1},
+            )
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertIn("accepted", payload)
+
+    def test_dev_agent_move_to_rejects_without_auth(self) -> None:
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/dev/agent/move-to",
+                json={"agent_id": "debug-agent", "x": 3, "y": 1},
+            )
+            self.assertEqual(response.status_code, 401)
+
     def test_signup_to_ws_handshake_flow(self) -> None:
         with TestClient(app) as client:
             signup = client.post(
@@ -86,8 +118,14 @@ class ApiWsFlowTests(unittest.TestCase):
 
                 static_msg = ws.receive_json()
                 self.assertEqual(static_msg["type"], "chunk_static")
+                self.assertEqual(
+                    static_msg["payload"]["render_hint"]["npc_overlay"],
+                    "chunk_delta.npcs",
+                )
                 delta_msg = ws.receive_json()
                 self.assertEqual(delta_msg["type"], "chunk_delta")
+                self.assertIn("npcs", delta_msg["payload"])
+                self.assertEqual(delta_msg["payload"]["npcs"], [])
 
                 cmd = {"type": "move_to", "x": 2, "y": 1}
                 ws.send_json(

@@ -15,6 +15,7 @@
 - `design/sequence.md`: 핵심 런타임 시퀀스(명령/전환/재동기화/GC)
 - `design/erd.md`: PostgreSQL 중심 ERD와 물리 모델
 - `design/protocol.md`: WS/SSE/HTTP 계약, 메시지 스키마, 에러 코드
+- `design/chunk-rendering.md`: 청크 렌더 요소(벽/땅/유저/npc) 해석 계약
 - `design/simulation.md`: 틱 엔진, 청크 생성/전환/GC, 경로 탐색, 공정성
 - `design/challenge-strategy.md`: challenge 생성/검증/anti-replay/PoW 전략
 - `design/deployment.md`: Windows 서버 기준 Docker Compose 배포 전략
@@ -40,7 +41,7 @@
 | 8 | 경로 탐색 | `design/simulation.md` |
 | 9 | 네트워크 프로토콜 | `design/protocol.md`, `design/component.md` |
 | 10 | 챌린지 인증 | `design/protocol.md`, `design/sequence.md`, `design/challenge-strategy.md` |
-| 11 | 관측 메시지 | `design/protocol.md`, `design/interface.md` |
+| 11 | 관측 메시지 | `design/protocol.md`, `design/interface.md`, `design/chunk-rendering.md` |
 | 12 | 청크 GC | `design/simulation.md`, `design/sequence.md` |
 | 13 | 레이트리밋/공정성 | `design/protocol.md`, `design/simulation.md` |
 | 14 | 확장 포인트 | `design/simulation.md`, `design/component.md` |
@@ -50,6 +51,7 @@
 ## 운영 원칙
 
 - 외부 계약 변경은 `design/protocol.md`와 `design/interface.md`를 동시에 갱신한다.
+- 렌더 요소/시각화 해석 규칙 변경은 `design/chunk-rendering.md`를 함께 갱신한다.
 - 도메인 규칙 변경은 `design/simulation.md` 기준으로 결정하고, 영향이 있으면 `design/sequence.md`를 갱신한다.
 - 저장소 스키마 변경은 `design/erd.md`를 먼저 갱신한 뒤 구현을 수정한다.
 
@@ -62,3 +64,4 @@
 | 2026-02-21 | Codex | 배포 전략 문서와 구현 착수 백로그 문서를 인덱스에 추가 | `design/index.md` |
 | 2026-02-21 | Codex | 협업 브랜치 정책 문서를 인덱스에 추가 | `design/index.md` |
 | 2026-02-21 | Codex | 마일스톤 원장 문서를 인덱스에 추가 | `design/index.md` |
+| 2026-02-21 | Codex | 청크 렌더 계약 문서를 인덱스와 커버리지 매핑에 추가 | `design/index.md` |

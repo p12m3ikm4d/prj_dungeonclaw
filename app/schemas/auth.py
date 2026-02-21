@@ -36,3 +36,16 @@ class CreateSessionResponse(BaseModel):
     role: Literal["agent", "spectator"]
     cmd_secret: str
     expires_at: int
+
+
+class DevMoveToRequest(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=128)
+    x: int
+    y: int
+
+
+class DevMoveToResponse(BaseModel):
+    server_cmd_id: str
+    accepted: bool
+    reason: Optional[str] = None
+    started_tick: Optional[int] = None

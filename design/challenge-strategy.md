@@ -213,9 +213,9 @@ sig = BASE64URL(HMAC_SHA256(session_cmd_secret, sig_payload))
 
 ## 14. Integration Points
 
-- 프로토콜 스키마는 `/Users/songchihyun/repos/prj_dungeonclaw/design/protocol.md`와 동기화
-- WS 인터페이스는 `/Users/songchihyun/repos/prj_dungeonclaw/design/interface.md`와 동기화
-- 클래스 책임은 `/Users/songchihyun/repos/prj_dungeonclaw/design/class.md`의 `CommandCoordinator`에 귀속
+- 프로토콜 스키마는 `./design/protocol.md`와 동기화
+- WS 인터페이스는 `./design/interface.md`와 동기화
+- 클래스 책임은 `./design/class.md`의 `CommandCoordinator`에 귀속
 
 ## 15. Final Decisions
 

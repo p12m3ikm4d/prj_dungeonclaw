@@ -350,14 +350,7 @@ class InMemoryTickEngine:
     ) -> Dict[str, Any]:
         async with self._lock:
             chunk = self._resolve_chunk(chunk_id=chunk_id, agent_id=agent_id)
-            return {
-                "chunk_id": chunk.chunk_id,
-                "size": {"w": self.width, "h": self.height},
-                "tiles": list(chunk.tiles_static),
-                "legend": {".": "floor", "#": "wall"},
-                "neighbors": dict(chunk.neighbors),
-                "tick_base": self._tick,
-            }
+            return self._build_chunk_static_payload(chunk)
 
     async def chunk_delta_payload(
         self,
@@ -793,6 +786,7 @@ class InMemoryTickEngine:
             "chunk_id": chunk.chunk_id,
             "tick": self._tick,
             "agents": self._agent_snapshots(chunk),
+            "npcs": [],
             "events": list(events),
         }
 
@@ -958,7 +952,13 @@ class InMemoryTickEngine:
             "chunk_id": chunk.chunk_id,
             "size": {"w": self.width, "h": self.height},
             "tiles": list(chunk.tiles_static),
+            "grid": self._build_numeric_grid(chunk),
             "legend": {".": "floor", "#": "wall"},
+            "render_hint": {
+                "cell_codes": {"0": "floor", "1": "wall"},
+                "agent_overlay": "chunk_delta.agents",
+                "npc_overlay": "chunk_delta.npcs",
+            },
             "neighbors": dict(chunk.neighbors),
             "tick_base": self._tick,
         }
@@ -967,3 +967,9 @@ class InMemoryTickEngine:
         if not (0 <= x < chunk.width and 0 <= y < chunk.height):
             return False
         return chunk.tiles_static[y][x] != "#"
+
+    def _build_numeric_grid(self, chunk: ChunkState) -> List[List[int]]:
+        rows: List[List[int]] = []
+        for row in chunk.tiles_static:
+            rows.append([1 if ch == "#" else 0 for ch in row])
+        return rows

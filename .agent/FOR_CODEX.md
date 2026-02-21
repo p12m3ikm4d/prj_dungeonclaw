@@ -27,4 +27,4 @@
 ## 비고
 
 - 이 파일 변경 시 Codex 검토 대상이 된다.
-- 불수용 사유는 `/Users/songchihyun/repos/prj_dungeonclaw/.agent/FOR_ANTIGRAVITY.md`의 `불수용 기록`에 남긴다.
+- 불수용 사유는 `./.agent/FOR_ANTIGRAVITY.md`의 `불수용 기록`에 남긴다.

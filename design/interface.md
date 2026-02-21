@@ -26,6 +26,7 @@
 | Auth | HTTP | `POST /v1/keys` | C -> S | account | Agent API Key 발급(해시 저장) |
 | Auth | HTTP | `POST /v1/sessions` | C -> S | api_key | 단기 세션 토큰 발급(`role=agent` 또는 `role=spectator`) |
 | Auth(dev) | HTTP | `POST /v1/dev/spectator-session` | C -> S | dev-only | 개발 환경에서 테스트 관전자 세션 토큰 발급 |
+| Debug(dev) | HTTP | `POST /v1/dev/agent/move-to` | C -> S | dev-only | challenge 생략 이동 테스트용(셀 클릭 디버그) |
 | Agent Plane | WS | `GET /v1/agent/ws?agent_id={id}` | Bi-di | `role=agent` | 커맨드/관측/결과 전달 |
 | Spectator Plane | SSE | `GET /v1/spectate/stream?chunk_id={id}` | S -> C | `role=spectator` | 관전자 기본 스트림 |
 | Spectator Plane (opt) | WS | `GET /v1/spectate/ws?chunk_id={id}` | S -> C | `role=spectator` | 네트워크 정책상 SSE 불가 시 대체 |
@@ -58,7 +59,8 @@
 - `role=spectator`
   - 허용: stream 구독
   - 차단: 모든 state mutation
-- dev spectator 세션은 read-only 테스트 목적이며 state mutation 권한을 부여하지 않는다.
+- dev spectator 세션은 기본적으로 read-only 테스트 목적이다.
+- 단, `POST /v1/dev/agent/move-to` dev 디버그 경로에서는 테스트 편의를 위해 제한적으로 이동 명령을 허용할 수 있다.
 
 ### 3.3 Trace Fields
 
@@ -141,7 +143,7 @@
 }
 ```
 
-challenge 세부 전략은 `/Users/songchihyun/repos/prj_dungeonclaw/design/challenge-strategy.md`를 기준으로 구현한다.
+challenge 세부 전략은 `./design/challenge-strategy.md`를 기준으로 구현한다.
 
 4) `command_ack` (Server -> Client)
 ```json
@@ -232,6 +234,19 @@ challenge 세부 전략은 `/Users/songchihyun/repos/prj_dungeonclaw/design/chal
 }
 ```
 
+### 4.9 Dev Debug Move Endpoint
+
+프론트엔드 디버그 셀 클릭 테스트를 위해 개발 전용 우회 경로를 제공한다.
+
+- URL: `POST /v1/dev/agent/move-to`
+- Header: `Authorization: Bearer <session_token or test-spectator-token>`
+- Body: `{ "agent_id": "debug-agent", "x": 3, "y": 1 }`
+- Response:
+  - `accepted=true`: `started_tick` 반환
+  - `accepted=false`: `reason` 반환(`out_of_bounds`, `unreachable`, `blocked` 등)
+
+이 경로는 challenge handshake를 생략하며 `environment != prod`에서만 활성화한다.
+
 ---
 
 ## 5. Spectator SSE Contract
@@ -241,6 +256,7 @@ challenge 세부 전략은 `/Users/songchihyun/repos/prj_dungeonclaw/design/chal
 - URL: `GET /v1/spectate/stream?chunk_id={chunk_id}`
 - Header: `Authorization: Bearer <session_token>` (필수, `role=spectator`)
 - `Last-Event-ID`를 지원하여 재연결 시 replay 시도
+- `chunk_id=demo`를 허용하며 서버는 이를 기본 청크(`chunk-0`)로 정규화한다.
 
 ### 5.2 Event Stream Order
 
@@ -304,7 +320,13 @@ Event ID 포맷:
   "chunk_id": "chunk-abc",
   "size": { "w": 50, "h": 50 },
   "tiles": ["##################################################", "...50 lines..."],
+  "grid": [[1, 1, 1], [1, 0, 0], "...50x50..."],
   "legend": { "#": "wall", ".": "floor" },
+  "render_hint": {
+    "cell_codes": { "0": "floor", "1": "wall" },
+    "agent_overlay": "chunk_delta.agents",
+    "npc_overlay": "chunk_delta.npcs"
+  },
   "neighbors": { "N": null, "E": "chunk-def", "S": null, "W": null },
   "tick_base": 3810
 }
@@ -312,6 +334,9 @@ Event ID 포맷:
 
 Rules:
 - `tiles`는 길이 50 문자열 50개.
+- `grid`는 렌더 우선 기준이며 `0=floor`, `1=wall`로 해석한다.
+- NPC 표시는 `chunk_delta.npcs[]`를 `grid` 위에 오버레이한다.
+- 유저 표시는 `chunk_delta.agents[]`를 `grid` 위에 오버레이한다.
 - `neighbors` 키는 `N/E/S/W`만 허용.
 
 ### 6.2 `chunk_delta`
@@ -324,6 +349,9 @@ Rules:
   "agents": [
     { "id": "me", "x": 10, "y": 11, "status": {} },
     { "id": "agent-77", "x": 7, "y": 20, "name": "Bob" }
+  ],
+  "npcs": [
+    { "id": "npc-1", "x": 11, "y": 11, "kind": "slime" }
   ],
   "patches": [
     { "x": 10, "y": 10, "ch": "." },
@@ -345,7 +373,10 @@ Rules:
 Rules:
 - `tick`은 chunk 단위 단조 증가.
 - `agents`는 delta 시점의 authoritative 좌표 스냅샷.
+- `npcs`는 delta 시점의 authoritative NPC 좌표 스냅샷(MVP에서는 빈 배열 가능).
 - `patches`는 optional 최적화 필드.
+
+렌더 상세 규칙은 `./design/chunk-rendering.md`를 기준으로 한다.
 
 ### 6.3 Event Normalization
 
@@ -445,7 +476,7 @@ Lock rule:
 
 `interface.md` 자동 갱신 시 아래 규칙을 사용한다.
 
-1. `design/architecture.md`, `design/index.md`, `design/planning.md`, `design/challenge-strategy.md` 변경점에서 인터페이스 영향 항목만 추출한다.
+1. `design/architecture.md`, `design/index.md`, `design/planning.md`, `design/challenge-strategy.md`, `design/chunk-rendering.md` 변경점에서 인터페이스 영향 항목만 추출한다.
 2. 영향이 있는 경우 이 문서의 다음 섹션을 동기화한다.
    - Endpoint matrix
    - Agent WS handshake
@@ -471,3 +502,5 @@ Lock rule:
 | 2026-02-21 | Codex | 미확정 항목을 토큰 필수/모더레이션/샤딩/allowlist 정책으로 확정 | 2.1, 5.1, 12 |
 | 2026-02-21 | Codex | 개발용 spectator 테스트 세션 발급 엔드포인트와 활성화 조건을 명시 | 2.1, 3.1, 3.2 |
 | 2026-02-21 | Codex | 개발 환경에서 임시 고정 테스트 관전자 토큰 허용 정책을 추가 | 3.1 |
+| 2026-02-21 | Codex | 프론트 디버그를 위한 dev move-to 우회 경로와 wall/floor/user 렌더 기준(grid/overlay)을 명시 | 2.1, 3.2, 4.9, 5.1, 6.1 |
+| 2026-02-21 | Codex | NPC 오버레이 필드와 청크 렌더 전용 계약 문서 참조를 추가 | 6.1, 6.2 |

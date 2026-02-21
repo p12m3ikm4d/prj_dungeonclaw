@@ -269,6 +269,13 @@ class TickEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("latest_delta", snapshot)
         self.assertEqual(snapshot["chunk_static"]["chunk_id"], "chunk-0")
         self.assertEqual(snapshot["latest_delta"]["chunk_id"], "chunk-0")
+        self.assertIn("grid", snapshot["chunk_static"])
+        self.assertIn("render_hint", snapshot["chunk_static"])
+        self.assertEqual(snapshot["chunk_static"]["render_hint"]["cell_codes"], {"0": "floor", "1": "wall"})
+        self.assertEqual(snapshot["chunk_static"]["render_hint"]["npc_overlay"], "chunk_delta.npcs")
+        self.assertIn("agents", snapshot["latest_delta"])
+        self.assertIn("npcs", snapshot["latest_delta"])
+        self.assertEqual(snapshot["latest_delta"]["npcs"], [])
 
     async def test_world_resets_to_chunk0_when_all_agents_leave(self) -> None:
         engine = InMemoryTickEngine(tick_hz=5, width=6, height=6)
