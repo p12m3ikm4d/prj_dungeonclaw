@@ -122,6 +122,18 @@ class InMemoryAuthStore:
             self._sessions_by_token[session.token] = session
             return session
 
+    def create_dev_owner_session(self, agent_id: str) -> Session:
+        if not agent_id:
+            raise AuthError("agent_id_required")
+        with self._lock:
+            session = self._issue_session(
+                account_id="acc_dev_owner",
+                role="owner_spectator",
+                agent_id=agent_id,
+            )
+            self._sessions_by_token[session.token] = session
+            return session
+
     def _issue_session(self, account_id: str, role: str, agent_id: Optional[str]) -> Session:
         issued_at = int(time.time())
         return Session(

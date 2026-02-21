@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from app.schemas.auth import (
     CreateKeyRequest,
     CreateKeyResponse,
+    DevOwnerSessionRequest,
     DevMoveToRequest,
     DevMoveToResponse,
     CreateSessionRequest,
@@ -95,6 +96,27 @@ async def create_dev_spectator_session(request: Request) -> CreateSessionRespons
     )
 
 
+@router.post("/v1/dev/owner-session", response_model=CreateSessionResponse)
+@router.post("/api/v1/dev/owner-session", response_model=CreateSessionResponse, include_in_schema=False)
+async def create_dev_owner_session(payload: DevOwnerSessionRequest, request: Request) -> CreateSessionResponse:
+    settings = request.app.state.settings
+    if not settings.dev_spectator_session_enabled:
+        raise HTTPException(status_code=403, detail="dev_spectator_session_disabled")
+
+    try:
+        session = _services(request).auth_store.create_dev_owner_session(payload.agent_id)
+    except AuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return CreateSessionResponse(
+        session_token=session.token,
+        session_jti=session.jti,
+        role=session.role,
+        cmd_secret=session.cmd_secret,
+        expires_at=session.expires_at,
+    )
+
+
 @router.post("/v1/dev/agent/move-to", response_model=DevMoveToResponse)
 @router.post("/api/v1/dev/agent/move-to", response_model=DevMoveToResponse, include_in_schema=False)
 async def dev_agent_move_to(payload: DevMoveToRequest, request: Request) -> DevMoveToResponse:
@@ -110,7 +132,7 @@ async def dev_agent_move_to(payload: DevMoveToRequest, request: Request) -> DevM
         session = _services(request).auth_store.get_session(token)
         if session is None:
             raise HTTPException(status_code=401, detail="invalid_session")
-        if session.role not in {"agent", "spectator"}:
+        if session.role not in {"agent", "owner_spectator", "spectator"}:
             raise HTTPException(status_code=403, detail="invalid_scope")
 
     try:

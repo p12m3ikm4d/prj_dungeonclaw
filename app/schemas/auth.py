@@ -38,6 +38,10 @@ class CreateSessionResponse(BaseModel):
     expires_at: int
 
 
+class DevOwnerSessionRequest(BaseModel):
+    agent_id: str = Field(default="demo-player", min_length=1, max_length=128)
+
+
 class DevMoveToRequest(BaseModel):
     agent_id: str = Field(min_length=1, max_length=128)
     x: int
