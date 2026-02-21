@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 
 const isConnected = ref(false)
@@ -14,6 +14,50 @@ const agents = ref<any[]>([])
 const npcs = ref<any[]>([])
 const floatingEvents = ref<any[]>([])
 const debugMoveAgentId = ref<string>('demo-player')
+
+// Viewport constants
+const VIEWPORT_W = 10;
+const VIEWPORT_H = 10;
+const CHUNK_W = 50;
+const CHUNK_H = 50;
+
+// Computed Viewport Bounds
+const viewportBounds = computed(() => {
+  let playerX = 25;
+  let playerY = 25;
+
+  const player = agents.value.find(a => a.id === debugMoveAgentId.value) || 
+                 npcs.value.find(n => n.id === debugMoveAgentId.value);
+  if (player) {
+    playerX = player.x;
+    playerY = player.y;
+  }
+
+  // Center player but clamp to chunk boundaries
+  let startX = Math.max(0, Math.min(playerX - Math.floor(VIEWPORT_W / 2), CHUNK_W - VIEWPORT_W));
+  let startY = Math.max(0, Math.min(playerY - Math.floor(VIEWPORT_H / 2), CHUNK_H - VIEWPORT_H));
+
+  return { startX, startY, endX: startX + VIEWPORT_W - 1, endY: startY + VIEWPORT_H - 1 };
+});
+
+const visibleGrid = computed(() => {
+  if (grid.value.length === 0) return [];
+  const { startX, startY, endX, endY } = viewportBounds.value;
+  const vGrid = [];
+  for (let y = startY; y <= endY; y++) {
+    const row = [];
+    for (let x = startX; x <= endX; x++) {
+      row.push({ x, y, val: grid.value[y][x] });
+    }
+    vGrid.push(row);
+  }
+  return vGrid;
+});
+
+const isVisible = (x: number, y: number) => {
+  const { startX, startY, endX, endY } = viewportBounds.value;
+  return x >= startX && x <= endX && y >= startY && y <= endY;
+};
 
 let abortController: AbortController | null = null
 // lastEventId is tracked by fetchEventSource internally, but we can keep a ref if we need it for UI
@@ -188,9 +232,9 @@ const handleFloatingEvent = (ev: any) => {
   }
 }
 
-// Quick helper
-const getCellWidth = () => 100 / (grid.value[0]?.length || 50);
-const getCellHeight = () => 100 / (grid.value.length || 50);
+// Viewport-relative helpers
+const getCellWidth = () => 100 / VIEWPORT_W;
+const getCellHeight = () => 100 / VIEWPORT_H;
 
 const handleCellClick = async (x: number, y: number) => {
   if (!spectatorToken.value) return;
@@ -281,36 +325,36 @@ onUnmounted(() => {
     <div class="content-area">
       <div class="map-container">
         <div v-if="grid.length > 0" class="world-grid">
-          <div v-for="(row, y) in grid" :key="`row-${y}`" class="grid-row">
-            <div v-for="(cell, x) in row" :key="`cell-${x}-${y}`" 
+          <div v-for="row in visibleGrid" :key="`row-${row[0].y}`" class="grid-row">
+            <div v-for="cell in row" :key="`cell-${cell.x}-${cell.y}`" 
                  class="grid-cell" 
-                 :class="{ 'wall': cell === 1, 'empty': cell === 0 }"
-                 @click="handleCellClick(x, y)">
+                 :class="{ 'wall': cell.val === 1, 'empty': cell.val === 0 }"
+                 @click="handleCellClick(cell.x, cell.y)">
             </div>
           </div>
           
           <!-- Dynamic NPC Layer (Absolute Positioning, below Agents) -->
-          <div v-for="npc in npcs" :key="npc.id" 
+          <div v-for="npc in npcs.filter(n => isVisible(n.x, n.y))" :key="npc.id" 
                class="agent-marker npc-marker"
-               :style="{ left: `${npc.x * getCellWidth()}%`, top: `${npc.y * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
+               :style="{ left: `${(npc.x - viewportBounds.startX) * getCellWidth()}%`, top: `${(npc.y - viewportBounds.startY) * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
             <div class="agent-sprite npc-sprite"></div>
             <span class="agent-name npc-name">{{ npc.name || npc.id.substring(0,4) }}</span>
           </div>
 
           <!-- Dynamic Agents Layer (Absolute Positioning) -->
-          <div v-for="agent in agents" :key="agent.id" 
+          <div v-for="agent in agents.filter(a => isVisible(a.x, a.y))" :key="agent.id" 
                class="agent-marker"
                :class="{ 'player-marker': agent.id === debugMoveAgentId }"
-               :style="{ left: `${agent.x * getCellWidth()}%`, top: `${agent.y * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
+               :style="{ left: `${(agent.x - viewportBounds.startX) * getCellWidth()}%`, top: `${(agent.y - viewportBounds.startY) * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
             <div class="agent-sprite"></div>
             <span class="agent-name">{{ agent.name || agent.id.substring(0,4) }}</span>
           </div>
 
           <!-- Dynamic Events Layer (Absolute Positioning) -->
-          <div v-for="ev in floatingEvents" :key="ev.id"
+          <div v-for="ev in floatingEvents.filter(e => isVisible(e.x, e.y))" :key="ev.id"
                class="floating-event"
                :class="ev.type"
-               :style="{ left: `${ev.x * getCellWidth()}%`, top: `${ev.y * getCellHeight()}%` }">
+               :style="{ left: `${(ev.x - viewportBounds.startX) * getCellWidth()}%`, top: `${(ev.y - viewportBounds.startY) * getCellHeight()}%` }">
             {{ ev.text }}
           </div>
         </div>
@@ -430,9 +474,12 @@ onUnmounted(() => {
   max-width: 100vmin; /* Keep it square-ish relative to viewport */
   max-height: 100vmin;
   aspect-ratio: 1 / 1;
-  background-color: #151822;
+  background-color: #151822; /* Default off-map color if visible */
   border: 1px solid #3b4252;
   position: relative; /* Essential for absolute overlay layers */
+  
+  /* Critical for pixel-perfect scaling of SVGs/Backgrounds */
+  image-rendering: pixelated; 
 }
 .grid-row {
   display: flex;
@@ -440,22 +487,31 @@ onUnmounted(() => {
 }
 .grid-cell {
   flex: 1;
-  border-right: 1px solid rgba(255,255,255,0.02);
-  border-bottom: 1px solid rgba(255,255,255,0.02);
+  /* border-right: 1px solid rgba(255,255,255,0.02); */
+  /* border-bottom: 1px solid rgba(255,255,255,0.02); */
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
 }
-.grid-cell:hover {
+.grid-cell:hover::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
   background-color: rgba(255,255,255,0.1);
+  pointer-events: none;
 }
+/* 32x32 Stone Wall Texture */
 .grid-cell.wall {
-  background-color: #2d313f;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="%232d313f"/><rect x="0" y="0" width="16" height="8" fill="%233b4252"/><rect x="17" y="0" width="15" height="8" fill="%233b4252"/><rect x="0" y="9" width="8" height="8" fill="%231a1d27"/><rect x="9" y="9" width="23" height="8" fill="%231a1d27"/><rect x="0" y="18" width="16" height="8" fill="%233b4252"/><rect x="17" y="18" width="15" height="8" fill="%233b4252"/><rect x="0" y="27" width="8" height="5" fill="%231a1d27"/><rect x="9" y="27" width="23" height="5" fill="%231a1d27"/></svg>');
 }
+/* 32x32 Dirt Floor Texture */
 .grid-cell.empty {
-  background-color: transparent;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="%2312151e"/><rect x="4" y="4" width="2" height="2" fill="%231a1d27"/><rect x="18" y="8" width="4" height="2" fill="%231a1d27"/><rect x="8" y="24" width="2" height="4" fill="%231a1d27"/><rect x="24" y="20" width="4" height="4" fill="%230f111a"/></svg>');
 }
 
 /* Agent & NPC rendering layer */

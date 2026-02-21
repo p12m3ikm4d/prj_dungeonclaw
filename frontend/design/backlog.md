@@ -24,3 +24,8 @@
 - [x] 제어 대상(`debugMoveAgentId`)의 `chunk_transition` 이벤트 추적 및 자동 청크 전환 구현
 - [x] 제어 대상 캐릭터(플레이어)를 시각적으로 구별 (주황색/골드 색상 및 스프라이트 변경)
 - [x] 시스템 로그 컨테이너가 무한히 늘어나는 CSS 레이아웃 버그 수정 (`min-height: 0` 등 스크롤 박스 제어)
+
+## Sprint 6: FOV Camera & Pixel Textures
+- [x] 전체 맵 대신 플레이어 중심의 `10x10` FOV 카메라 렌더링 범위 제한 (`viewportBounds` 계산 구현)
+- [x] `32x32px` 도트 아트 느낌의 Floor/Wall 렌더링용 임시 SVG 텍스쳐 적용
+- [x] 모니터 DPI / 브라우저 해상도에 무관하게 그래픽이 뭉개지지 않도록 CSS 정수 스케일링(`image-rendering: pixelated`) 적용
