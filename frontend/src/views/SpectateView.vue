@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 
 const isConnected = ref(false)
@@ -12,7 +12,56 @@ const currentTick = ref<number>(0)
 const grid = ref<number[][]>([])
 const agents = ref<any[]>([])
 const npcs = ref<any[]>([])
+const goldNodes = ref<any[]>([])
+const inventory = ref<Record<string, number>>({})
 const floatingEvents = ref<any[]>([])
+const debugMoveAgentId = ref<string>('demo-player')
+
+// Viewport constants
+const VIEWPORT_W = 15;
+const VIEWPORT_H = 15;
+const CHUNK_W = 50;
+const CHUNK_H = 50;
+
+// Computed Viewport Bounds
+const neighbors = ref<Record<string, string | null>>({})
+
+const viewportBounds = computed(() => {
+  let playerX = 25;
+  let playerY = 25;
+
+  const player = agents.value.find(a => a.id === debugMoveAgentId.value) || 
+                 npcs.value.find(n => n.id === debugMoveAgentId.value);
+  if (player) {
+    playerX = player.x;
+    playerY = player.y;
+  }
+
+  // Center player but clamp to chunk boundaries
+  let startX = Math.max(0, Math.min(playerX - Math.floor(VIEWPORT_W / 2), CHUNK_W - VIEWPORT_W));
+  let startY = Math.max(0, Math.min(playerY - Math.floor(VIEWPORT_H / 2), CHUNK_H - VIEWPORT_H));
+
+  return { startX, startY, endX: startX + VIEWPORT_W - 1, endY: startY + VIEWPORT_H - 1 };
+});
+
+const visibleGrid = computed(() => {
+  if (grid.value.length === 0) return [];
+  const { startX, startY, endX, endY } = viewportBounds.value;
+  const vGrid = [];
+  for (let y = startY; y <= endY; y++) {
+    const row = [];
+    for (let x = startX; x <= endX; x++) {
+      row.push({ x, y, val: grid.value[y][x] });
+    }
+    vGrid.push(row);
+  }
+  return vGrid;
+});
+
+const isVisible = (x: number, y: number) => {
+  const { startX, startY, endX, endY } = viewportBounds.value;
+  return x >= startX && x <= endX && y >= startY && y <= endY;
+};
 
 let abortController: AbortController | null = null
 // lastEventId is tracked by fetchEventSource internally, but we can keep a ref if we need it for UI
@@ -35,7 +84,7 @@ const addLog = (msg: string) => {
   scrollToBottom()
 }
 
-const connectSSE = (chunkId: string = 'demo') => {
+const connectSSE = () => {
   if (abortController) {
     abortController.abort()
   }
@@ -46,7 +95,7 @@ const connectSSE = (chunkId: string = 'demo') => {
     return
   }
 
-  const url = `${API_BASE_URL}/v1/spectate/stream?chunk_id=${chunkId}`
+  const url = `${API_BASE_URL}/v1/owner/stream?agent_id=${debugMoveAgentId.value}`
   
   fetchEventSource(url, {
     method: 'GET',
@@ -77,12 +126,38 @@ const connectSSE = (chunkId: string = 'demo') => {
         } else if (data.type === 'chunk_static') {
           currentChunk.value = data.chunk_id
           grid.value = data.grid || Array(50).fill(Array(50).fill(0))
+          neighbors.value = data.neighbors || {}
+          
+          if (data.resource_nodes) {
+            goldNodes.value = data.resource_nodes.map((n: any) => ({
+              ...n,
+              remaining: n.max_remaining
+            }))
+          } else {
+            goldNodes.value = []
+          }
+
+          if (data.render_hint?.debug_move_default_agent_id) {
+            debugMoveAgentId.value = data.render_hint.debug_move_default_agent_id
+          }
           addLog(`Loaded static chunk layout [${data.chunk_id}]`)
         } else if (data.type === 'chunk_delta') {
           currentChunk.value = data.chunk_id
           currentTick.value = data.tick
           agents.value = data.agents || []
           npcs.value = data.npcs || []
+          
+          if (data.resources) {
+            // merge live resource states into static nodes
+            data.resources.forEach((liveNode: any) => {
+              const node = goldNodes.value.find(n => n.node_id === liveNode.node_id)
+              if (node) {
+                node.remaining = liveNode.remaining
+                if (liveNode.state) node.state = liveNode.state
+              }
+            })
+          }
+
           if (data.events && data.events.length > 0) {
             data.events.forEach((ev: any) => {
               addLog(`[Event] ${ev.type} from ${ev.from || ev.by || 'unknown'}`)
@@ -90,8 +165,21 @@ const connectSSE = (chunkId: string = 'demo') => {
             })
           }
         } else if (data.type === 'chunk_transition') {
-          addLog(`Agent transition to ${data.payload?.to_chunk_id}`)
-          setTimeout(() => connectSSE(data.payload?.to_chunk_id), 100)
+          const transAgentId = data.agent_id || data.payload?.agent_id;
+          const transToChunkId = data.to_chunk_id || data.payload?.to_chunk_id;
+          if (transAgentId === debugMoveAgentId.value) {
+            addLog(`Received chunk_transition to ${transToChunkId}. Map will naturally re-render when new chunk_static arrives.`)
+            // The stream STAYS OPEN and auto-follows. No need to reconnect.
+            // We can optionally clear the grid to show a transition blip
+            grid.value = []
+          } else {
+            addLog(`Agent [${transAgentId || 'unknown'}] transitioned to ${transToChunkId || 'unknown'}`)
+          }
+        } else if (data.type === 'agent_private_delta') {
+          const transAgentId = data.agent_id || data.payload?.agent_id;
+          if (transAgentId === debugMoveAgentId.value && data.payload?.inventory) {
+            inventory.value = data.payload.inventory
+          }
         } else if (data.type === 'resync_required') {
           addLog(`Resync required. Fetching snapshot...`)
           fetchSnapshot(data.snapshot_url)
@@ -129,6 +217,9 @@ const fetchSnapshot = async (snapshotUrl: string) => {
       if (data.chunk_static) {
         currentChunk.value = data.chunk_static.chunk_id
         grid.value = data.chunk_static.grid || []
+        if (data.chunk_static.render_hint?.debug_move_default_agent_id) {
+          debugMoveAgentId.value = data.chunk_static.render_hint.debug_move_default_agent_id
+        }
       }
       if (data.latest_delta) {
         currentTick.value = data.latest_delta.tick
@@ -177,13 +268,16 @@ const handleFloatingEvent = (ev: any) => {
   }
 }
 
-// Quick helper
-const getCellWidth = () => 100 / (grid.value[0]?.length || 50);
-const getCellHeight = () => 100 / (grid.value.length || 50);
+// Viewport-relative helpers
+const getCellWidth = () => 100 / VIEWPORT_W;
+const getCellHeight = () => 100 / VIEWPORT_H;
 
 const handleCellClick = async (x: number, y: number) => {
   if (!spectatorToken.value) return;
-  addLog(`Requesting move to (${x}, ${y})...`)
+  
+  // Allow clicking 1 tile out of bounds to trigger transitions, but not wildly OOB
+  if (x < -1 || x > CHUNK_W || y < -1 || y > CHUNK_H) return;
+  addLog(`Requesting move for [${debugMoveAgentId.value}] to (${x}, ${y})...`)
   
   try {
     const res = await fetch(`${API_BASE_URL}/v1/dev/agent/move-to`, {
@@ -193,7 +287,7 @@ const handleCellClick = async (x: number, y: number) => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        agent_id: 'debug-agent',
+        agent_id: debugMoveAgentId.value,
         x,
         y
       })
@@ -220,11 +314,16 @@ const handleCellClick = async (x: number, y: number) => {
 
 
 
+
 const initSpectatorSession = async () => {
   try {
-    addLog('Requesting dev spectator session token...')
-    const res = await fetch(`${API_BASE_URL}/v1/dev/spectator-session`, {
-      method: 'POST'
+    addLog('Requesting dev owner spectator session token...')
+    const res = await fetch(`${API_BASE_URL}/v1/dev/owner-session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ agent_id: debugMoveAgentId.value })
     })
     if (res.ok) {
       const data = await res.json()
@@ -270,35 +369,44 @@ onUnmounted(() => {
     <div class="content-area">
       <div class="map-container">
         <div v-if="grid.length > 0" class="world-grid">
-          <div v-for="(row, y) in grid" :key="`row-${y}`" class="grid-row">
-            <div v-for="(cell, x) in row" :key="`cell-${x}-${y}`" 
+          <div v-for="row in visibleGrid" :key="`row-${row[0].y}`" class="grid-row">
+            <div v-for="cell in row" :key="`cell-${cell.x}-${cell.y}`" 
                  class="grid-cell" 
-                 :class="{ 'wall': cell === 1, 'empty': cell === 0 }"
-                 @click="handleCellClick(x, y)">
+                 :class="{ 'wall': cell.val === 1, 'empty': cell.val === 0 }"
+                 @click="handleCellClick(cell.x, cell.y)">
             </div>
           </div>
           
+          <!-- Dynamic Gold Node Layer (Absolute Positioning, below NPCs) -->
+          <div v-for="node in goldNodes.filter(n => isVisible(n.x, n.y))" :key="node.node_id"
+               class="resource-marker"
+               :style="{ left: `${(node.x - viewportBounds.startX) * getCellWidth()}%`, top: `${(node.y - viewportBounds.startY) * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
+            <div class="resource-sprite gold-node" :class="{ depleted: node.remaining === 0 }"></div>
+            <span class="resource-amount">{{ node.remaining }}</span>
+          </div>
+          
           <!-- Dynamic NPC Layer (Absolute Positioning, below Agents) -->
-          <div v-for="npc in npcs" :key="npc.id" 
+          <div v-for="npc in npcs.filter(n => isVisible(n.x, n.y))" :key="npc.id" 
                class="agent-marker npc-marker"
-               :style="{ left: `${npc.x * getCellWidth()}%`, top: `${npc.y * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
+               :style="{ left: `${(npc.x - viewportBounds.startX) * getCellWidth()}%`, top: `${(npc.y - viewportBounds.startY) * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
             <div class="agent-sprite npc-sprite"></div>
             <span class="agent-name npc-name">{{ npc.name || npc.id.substring(0,4) }}</span>
           </div>
 
           <!-- Dynamic Agents Layer (Absolute Positioning) -->
-          <div v-for="agent in agents" :key="agent.id" 
+          <div v-for="agent in agents.filter(a => isVisible(a.x, a.y))" :key="agent.id" 
                class="agent-marker"
-               :style="{ left: `${agent.x * getCellWidth()}%`, top: `${agent.y * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
+               :class="{ 'player-marker': agent.id === debugMoveAgentId }"
+               :style="{ left: `${(agent.x - viewportBounds.startX) * getCellWidth()}%`, top: `${(agent.y - viewportBounds.startY) * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
             <div class="agent-sprite"></div>
             <span class="agent-name">{{ agent.name || agent.id.substring(0,4) }}</span>
           </div>
 
           <!-- Dynamic Events Layer (Absolute Positioning) -->
-          <div v-for="ev in floatingEvents" :key="ev.id"
+          <div v-for="ev in floatingEvents.filter(e => isVisible(e.x, e.y))" :key="ev.id"
                class="floating-event"
                :class="ev.type"
-               :style="{ left: `${ev.x * getCellWidth()}%`, top: `${ev.y * getCellHeight()}%` }">
+               :style="{ left: `${(ev.x - viewportBounds.startX) * getCellWidth()}%`, top: `${(ev.y - viewportBounds.startY) * getCellHeight()}%` }">
             {{ ev.text }}
           </div>
         </div>
@@ -311,15 +419,60 @@ onUnmounted(() => {
         <div class="panel-section agent-info">
           <h3>Agent Status</h3>
           <div class="agent-stats" v-if="agents.length > 0">
-            <div v-for="agent in agents" :key="agent.id" class="agent-card">
-              <div class="stat"><span class="label">ID</span><span class="value">{{ agent.id }}</span></div>
-              <div class="stat"><span class="label">HP</span><span class="value">{{ agent.hp }}</span></div>
+            <div v-for="agent in agents" :key="agent.id" class="agent-card" :class="{ 'me': agent.id === debugMoveAgentId }">
+              <div class="card-header">
+                <span class="label">ID</span><span class="value">{{ agent.id }}</span>
+              </div>
+              <div class="stat"><span class="label">State</span><span class="value status-badge">{{ agent.activity_state || 'idle' }}</span></div>
               <div class="stat"><span class="label">Pos</span><span class="value">(x:{{ agent.x }}, y:{{ agent.y }})</span></div>
+              
+              <!-- Private Inventory Section (Only for ME) -->
+              <div class="agent-inventory" v-if="agent.id === debugMoveAgentId && inventory.gold !== undefined">
+                <div class="inventory-item">
+                  <span class="inv-icon">🪙</span>
+                  <span class="inv-count">{{ inventory.gold }}</span>
+                </div>
+              </div>
             </div>
           </div>
           <div class="agent-stats empty-state" v-else>
             No agents in this chunk.
           </div>
+        </div>
+
+        <div class="panel-section minimap">
+          <h3>Current Chunk Minimap</h3>
+          <div class="minimap-container" v-if="grid.length > 0">
+            <div class="mini-grid">
+              <div v-for="(row, y) in grid" :key="`m-row-${y}`" class="mini-row">
+                <div v-for="(cell, x) in row" :key="`m-cell-${x}-${y}`"
+                     class="mini-cell"
+                     :class="{'m-wall': cell === 1, 'm-empty': cell === 0}">
+                </div>
+              </div>
+              
+              <!-- Mini NPCs -->
+              <div v-for="npc in npcs" :key="`m-npc-${npc.id}`"
+                   class="mini-npc"
+                   :style="{ left: `${npc.x * 2}%`, top: `${npc.y * 2}%` }"></div>
+
+              <!-- Mini Agents -->
+              <div v-for="agent in agents" :key="`m-agent-${agent.id}`"
+                   class="mini-agent"
+                   :class="{ 'm-player': agent.id === debugMoveAgentId }"
+                   :style="{ left: `${agent.x * 2}%`, top: `${agent.y * 2}%` }"></div>
+                   
+              <!-- Minimap Viewport Outline -->
+              <div class="mini-viewport"
+                   :style="{ 
+                     left: `${viewportBounds.startX * 2}%`, 
+                     top: `${viewportBounds.startY * 2}%`,
+                     width: `${(viewportBounds.endX - viewportBounds.startX + 1) * 2}%`,
+                     height: `${(viewportBounds.endY - viewportBounds.startY + 1) * 2}%`
+                   }"></div>
+            </div>
+          </div>
+          <div class="empty-state" v-else>No chunk data</div>
         </div>
         
         <div class="panel-section event-log">
@@ -341,7 +494,11 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  height: 100%;
+  height: 100vh;
+  max-height: 100vh;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 1rem;
 }
 /* Top Status bar */
 .status-panel {
@@ -408,19 +565,24 @@ onUnmounted(() => {
   position: relative;
   overflow: hidden;
   box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+  container-type: size; /* Treat map container as size container */
 }
 /* Grid Rendering */
 .world-grid {
   display: flex;
   flex-direction: column;
-  width: 100%;
-  height: 100%;
-  max-width: 100vmin; /* Keep it square-ish relative to viewport */
-  max-height: 100vmin;
+  /* Use container's min dimension to force a perfect square */
+  width: 100cqmin;
+  height: 100cqmin;
+  max-width: 100%;
+  max-height: 100%;
   aspect-ratio: 1 / 1;
-  background-color: #151822;
+  background-color: #151822; /* Default off-map color if visible */
   border: 1px solid #3b4252;
   position: relative; /* Essential for absolute overlay layers */
+  
+  /* Critical for pixel-perfect scaling of SVGs/Backgrounds */
+  image-rendering: pixelated; 
 }
 .grid-row {
   display: flex;
@@ -428,22 +590,31 @@ onUnmounted(() => {
 }
 .grid-cell {
   flex: 1;
-  border-right: 1px solid rgba(255,255,255,0.02);
-  border-bottom: 1px solid rgba(255,255,255,0.02);
+  /* border-right: 1px solid rgba(255,255,255,0.02); */
+  /* border-bottom: 1px solid rgba(255,255,255,0.02); */
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
 }
-.grid-cell:hover {
+.grid-cell:hover::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
   background-color: rgba(255,255,255,0.1);
+  pointer-events: none;
 }
+/* 32x32 Stone Wall Texture */
 .grid-cell.wall {
-  background-color: #2d313f;
+  background-image: url('../assets/wall.svg');
 }
+/* 32x32 Dirt Floor Texture */
 .grid-cell.empty {
-  background-color: transparent;
+  background-image: url('../assets/floor.svg');
 }
 
 /* Agent & NPC rendering layer */
@@ -461,19 +632,56 @@ onUnmounted(() => {
   z-index: 9; /* Render below agents if on same cell */
 }
 .agent-sprite {
-  width: 70%;
-  height: 70%;
-  background-color: #00d2ff;
+  width: 100%; height: 100%;
   border-radius: 50%;
-  box-shadow: 0 0 10px rgba(0, 210, 255, 0.6);
-  animation: float 2s ease-in-out infinite, pulse-glow 2s infinite alternate;
+  background-color: #00d2ff;
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.5);
+  transition: transform 0.2s;
+}
+.player-marker .agent-sprite {
+  background-color: #ffaa00;
+  box-shadow: 0 0 15px rgba(255, 170, 0, 0.8);
+  transform: scale(1.15);
 }
 .npc-sprite {
   background-color: #00ff88;
-  box-shadow: 0 0 10px rgba(0, 255, 136, 0.6);
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
   border-radius: 20%; /* different shape for npc */
   animation: float 2.5s ease-in-out infinite alternate;
 }
+
+/* Resources */
+.resource-marker {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+}
+.gold-node {
+  width: 80%;
+  height: 80%;
+  background-image: url('../assets/gold.svg');
+  background-size: cover;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 5px rgba(255, 215, 0, 0.5));
+}
+.gold-node.depleted {
+  filter: grayscale(100%) opacity(40%);
+}
+.resource-amount {
+  position: absolute;
+  bottom: -10px;
+  font-size: 0.6rem;
+  font-family: monospace;
+  font-weight: bold;
+  color: #ffd700;
+  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+}
+
+/* Floating Events */
 .agent-name {
   position: absolute;
   top: -15px;
@@ -546,6 +754,9 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  min-width: 300px;
+  min-height: 0;
+  max-height: 100%;
 }
 .panel-section {
   background-color: #1a1d27;
@@ -557,9 +768,64 @@ onUnmounted(() => {
 }
 .agent-info {
   flex: 0 0 auto;
+  max-height: 25%;
+  overflow-y: auto;
 }
+.minimap {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+.minimap-container {
+  padding: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.mini-grid {
+  width: 150px;
+  height: 150px; /* 50x50 cells, each is exactly 2% (3px technically) */
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: #111;
+  border: 1px solid #3b4252;
+}
+.mini-row {
+  display: flex;
+  height: 2%; /* 1/50 */
+}
+.mini-cell {
+  width: 2%; /* 1/50 */
+  height: 100%;
+}
+.m-wall { background-color: #2d313f; }
+.m-empty { background-color: transparent; }
+
+.mini-npc, .mini-agent {
+  position: absolute;
+  width: 2%; height: 2%;
+  border-radius: 50%;
+}
+.mini-npc { background-color: #00ff88; z-index: 5; }
+.mini-agent { background-color: #00d2ff; z-index: 10; }
+.mini-agent.m-player {
+  background-color: #ffaa00;
+  box-shadow: 0 0 4px #ffaa00;
+  z-index: 15;
+  transform: scale(2);
+}
+.mini-viewport {
+  position: absolute;
+  border: 1px solid rgba(255,255,255,0.3);
+  background-color: rgba(255,255,255,0.05); /* very faint highlight */
+  pointer-events: none;
+  z-index: 20;
+}
+
 .event-log {
   flex: 1;
+  min-height: 0;
 }
 .panel-section h3 {
   margin: 0;
@@ -578,11 +844,53 @@ onUnmounted(() => {
   gap: 0.5rem;
 }
 .agent-card {
-  background: rgba(255,255,255,0.03);
+  background: rgba(255,255,255,0.02);
   padding: 0.75rem;
   border-radius: 6px;
   border-left: 3px solid #00d2ff;
 }
+.agent-card.me {
+  border-left-color: #ffaa00;
+  background: rgba(255, 170, 0, 0.05);
+}
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+.status-badge {
+  background: rgba(0, 255, 136, 0.1);
+  color: #00ff88;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.agent-inventory {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed rgba(255,255,255,0.1);
+  display: flex;
+}
+.inventory-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255, 215, 0, 0.1);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 215, 0, 0.2);
+}
+.inv-icon {
+  font-size: 0.9rem;
+}
+.inv-count {
+  font-weight: bold;
+  color: #ffd700;
+  font-family: monospace;
+}
+
 .empty-state {
   color: #5c677d;
   font-size: 0.9rem;

@@ -78,6 +78,18 @@ class ApiWsFlowTests(unittest.TestCase):
         finally:
             app.state.settings.enable_dev_spectator_session = original
 
+    def test_dev_owner_session_issues_owner_spectator_token(self) -> None:
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/dev/owner-session",
+                json={"agent_id": "demo-player"},
+            )
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(payload["role"], "owner_spectator")
+            self.assertTrue(payload["session_token"].startswith("sess_"))
+            self.assertTrue(payload["session_jti"].startswith("jti_"))
+
     def test_dev_agent_move_to_without_challenge(self) -> None:
         with TestClient(app) as client:
             target_x = app.state.settings.chunk_width // 2
@@ -113,6 +125,26 @@ class ApiWsFlowTests(unittest.TestCase):
                 json={"agent_id": "debug-agent-c", "x": 3, "y": 1},
             )
             self.assertEqual(response.status_code, 401)
+
+    def test_dev_agent_move_to_accepts_owner_spectator_session(self) -> None:
+        with TestClient(app) as client:
+            owner_session = client.post(
+                "/v1/dev/owner-session",
+                json={"agent_id": "demo-player"},
+            )
+            self.assertEqual(owner_session.status_code, 200)
+            token = owner_session.json()["session_token"]
+
+            target_x = app.state.settings.chunk_width // 2
+            target_y = app.state.settings.chunk_height // 2
+            response = client.post(
+                "/v1/dev/agent/move-to",
+                headers={"authorization": f"Bearer {token}"},
+                json={"agent_id": "demo-player", "x": target_x, "y": target_y},
+            )
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertTrue(payload["accepted"])
 
     def test_signup_to_ws_handshake_flow(self) -> None:
         with TestClient(app) as client:

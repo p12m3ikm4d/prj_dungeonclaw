@@ -113,6 +113,37 @@ class TickEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.chunk_id, transition["to_chunk_id"])
         self.assertEqual((state.x, state.y), (0, 1))
 
+    async def test_owner_listener_receives_transition_static_delta_sequence(self) -> None:
+        engine = InMemoryTickEngine(tick_hz=5, width=6, height=6)
+        await engine.ensure_agent("a1")
+        owner_q = await engine.register_owner_listener("a1")
+
+        await engine.submit_move_command(
+            agent_id="a1",
+            server_cmd_id="cmd-owner-transition",
+            target_x=5,
+            target_y=1,
+        )
+        for _ in range(5):
+            await engine.tick_once()
+
+        events = []
+        while not owner_q.empty():
+            events.append(owner_q.get_nowait())
+
+        transition_idx = None
+        for idx, event in enumerate(events):
+            if event["type"] == "chunk_transition":
+                transition_idx = idx
+                break
+
+        self.assertIsNotNone(transition_idx)
+        assert transition_idx is not None
+        self.assertGreaterEqual(len(events), transition_idx + 3)
+        self.assertEqual(events[transition_idx + 1]["type"], "chunk_static")
+        self.assertEqual(events[transition_idx + 2]["type"], "chunk_delta")
+        self.assertTrue(any(event["type"] == "command_result" for event in events))
+
     async def test_transition_blocked_by_destination_occupancy_keeps_origin_position(self) -> None:
         engine = InMemoryTickEngine(tick_hz=5, width=6, height=6)
         q1 = await engine.register_listener("a1")
@@ -302,6 +333,34 @@ class TickEngineTests(unittest.IsolatedAsyncioTestCase):
 
         static_payload = await engine.chunk_static_payload(chunk_id="chunk-0")
         self.assertEqual(static_payload["neighbors"], {"N": None, "E": None, "S": None, "W": None})
+
+    async def test_demo_player_prefers_root_center_spawn(self) -> None:
+        engine = InMemoryTickEngine(tick_hz=5, width=50, height=50, enable_demo_actors=True)
+        agent = await engine.ensure_agent("demo-player")
+        self.assertEqual((agent.x, agent.y), (25, 25))
+
+        delta = await engine.chunk_delta_payload(chunk_id="chunk-0")
+        demo_entries = [item for item in delta["agents"] if item["id"] == "demo-player"]
+        self.assertEqual(len(demo_entries), 1)
+        self.assertEqual(demo_entries[0].get("name"), "You")
+
+    async def test_demo_player_is_not_duplicated_after_move(self) -> None:
+        engine = InMemoryTickEngine(tick_hz=5, width=50, height=50, enable_demo_actors=True)
+        await engine.ensure_agent("demo-player")
+
+        await engine.submit_move_command(
+            agent_id="demo-player",
+            server_cmd_id="cmd-demo-move",
+            target_x=26,
+            target_y=25,
+        )
+        await engine.tick_once()
+
+        delta = await engine.chunk_delta_payload(chunk_id="chunk-0")
+        demo_entries = [item for item in delta["agents"] if item["id"] == "demo-player"]
+        self.assertEqual(len(demo_entries), 1)
+        self.assertEqual(demo_entries[0].get("name"), "You")
+        self.assertEqual((demo_entries[0]["x"], demo_entries[0]["y"]), (26, 25))
 
 
 if __name__ == "__main__":

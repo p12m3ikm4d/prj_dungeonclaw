@@ -2,6 +2,18 @@
 
 본 백로그는 현재 설계 산출물을 기준으로 구현 착수 순서를 고정한다.
 
+## 0.1 Status Snapshot (2026-02-21)
+
+| Sprint | Status | Notes |
+|---|---|---|
+| Sprint 0 | Done | infra/skeleton 완료 (마일스톤 원장 참조) |
+| Sprint 1 | Done | Auth + Session + Challenge core 완료 |
+| Sprint 2 | Done | Tick + `move_to` 완료 |
+| Sprint 3 | Done | Boundary + Chunk lifecycle 완료 |
+| Sprint 4 | Done (P0) | Spectator SSE/Replay/Resync 완료, WS fallback은 보류 |
+| Sprint 5 | Planned | 운영 하드닝(rate limit/moderation/ops) |
+| Sprint 6 | Done (P0) | owner stream/role 확장/명령 이벤트 추적 구현 완료, WS fallback(P1) 보류 |
+
 ## 0. Progress Snapshot Rule
 
 - 스프린트 정의는 본 문서를 기준으로 유지한다.
@@ -97,20 +109,43 @@
 
 - 운영 체크리스트 통과(배포/업데이트/복구/모니터링)
 
-## 7. Technical Debt Queue
+## 7. Sprint 6 (Owner Spectator Follow Plane)
+
+### P0
+
+- `POST /v1/sessions`에서 `role=owner_spectator` 발급/검증 지원
+- `GET /v1/owner/stream?agent_id={id}` SSE 구현(read-only)
+- owner stream에 tracked agent 이벤트(`chunk_transition`, `chunk_static`, `chunk_delta`, `command_*`) 전달
+- owner stream과 global spectator 권한 경계 분리(전자는 tracked/private 포함, 후자는 공유 이벤트만)
+- owner stream 자동 추적(청크 전환 시 재구독 없이 destination payload 연속 수신)
+
+### P1
+
+- `GET /v1/owner/ws?agent_id={id}` fallback 구현
+- owner stream replay/resync 정책 정교화
+
+### Exit Criteria
+
+- tracked agent가 경계를 넘어가도 owner UI가 수동 재연결 없이 전환 이벤트를 연속 수신
+- global spectator에는 `chunk_transition`/private 이벤트가 노출되지 않음
+
+## 8. Technical Debt Queue
 
 - event_log/snapshot 저장 정책 정밀화
 - 샤딩 라우팅 구현(`hash(chunk_id) % shard_count`)
 - SDK/CLI 테스트 하네스
 
-## 8. Final Decisions
+## 9. Final Decisions
 
 - 구현 우선순위는 `challenge -> tick -> boundary -> stream -> hardening` 순서로 고정한다.
 - 프론트엔드 구현은 본 백로그 범위에서 제외한다.
+- 현재 구현 착수 트랙은 Sprint 6(P0)으로 고정한다.
 
 ## Revision
 
 | Date | Author | Summary | Impacted Sections |
 |---|---|---|---|
+| 2026-02-21 | Codex | Sprint 6 P0 완료 상태와 증적 반영(Owner stream/role/추적 이벤트), P1 잔여 항목 명시 | 0.1, 7 |
+| 2026-02-21 | Codex | 스프린트 상태 스냅샷과 Owner Spectator 구현 스프린트(Sprint 6)를 추가하고 착수 트랙을 명시 | 0.1, 7, 9 |
 | 2026-02-21 | Codex | 설계 완료 이후 구현 착수용 백로그(스프린트/우선순위/완료조건) 작성 | All |
 | 2026-02-21 | Codex | 스프린트 완료 판정 기준을 마일스톤 원장 연동 방식으로 명확화 | 0 |

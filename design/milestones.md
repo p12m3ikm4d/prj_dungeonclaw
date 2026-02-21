@@ -21,6 +21,7 @@
 | M6-BE-SPRINT3 | Boundary + Chunk Lifecycle | Done | `ef3f93b` | `develop` | 원자 전환/neighbor lock/GC 기본 구현 완료 |
 | M7-BE-SPRINT4 | Spectator Streaming Hardening | Done (P0) | `27a1dbb` | `codex/sprint4-sse-streaming` | SSE stream/replay/resync/snapshot/read-only 구현, Spectator WS fallback(P1)은 후속 |
 | M8-BE-SPRINT5 | Operational Hardening | Planned | TBD | `develop` (target) | rate limit/moderation/운영 복구 절차 점검 예정 |
+| M9-BE-SPRINT6 | Owner Spectator Follow Plane | Done (P0) | `bb76278` | `codex/sprint6-owner-stream` | `owner_spectator` 세션/`/v1/owner/stream`/agent 이벤트 미러링 및 dev owner session 추가 |
 
 ## 3. Update Procedure
 
@@ -38,5 +39,6 @@
 
 | Date | Author | Summary | Impacted Sections |
 |---|---|---|---|
+| 2026-02-21 | Codex | Sprint6 P0 구현 증적(`bb76278`)을 마일스톤 원장에 반영 | 2 |
 | 2026-02-21 | Codex | 스프린트별 완료 증적 커밋을 추적하는 마일스톤 원장 문서 신설 | All |
 | 2026-02-21 | Codex | Sprint3/4 백엔드 구현 증적 커밋을 반영하고 Sprint4 상태를 P0 완료로 갱신 | 2 |

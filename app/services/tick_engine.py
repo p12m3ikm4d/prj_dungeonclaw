@@ -85,6 +85,7 @@ class InMemoryTickEngine:
         self._neighbor_lock_refcnt: Dict[Tuple[str, str], int] = {}
 
         self._listeners: Dict[str, Set[asyncio.Queue]] = {}
+        self._owner_listeners: Dict[str, Set[asyncio.Queue]] = {}
         self._spectator_listeners: Dict[str, Set[asyncio.Queue]] = {}
         self._spectator_history: Dict[str, Deque[Dict[str, Any]]] = {}
         self._spectator_seq: Dict[str, int] = {}
@@ -146,6 +147,25 @@ class InMemoryTickEngine:
             listeners.discard(queue)
             if not listeners:
                 self._listeners.pop(agent_id, None)
+
+    async def register_owner_listener(self, agent_id: str) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+        async with self._lock:
+            self._owner_listeners.setdefault(agent_id, set()).add(queue)
+        return queue
+
+    async def unregister_owner_listener(self, agent_id: str, queue: asyncio.Queue) -> None:
+        async with self._lock:
+            listeners = self._owner_listeners.get(agent_id)
+            if not listeners:
+                return
+            listeners.discard(queue)
+            if not listeners:
+                self._owner_listeners.pop(agent_id, None)
+
+    async def emit_owner_event(self, agent_id: str, message: Dict[str, Any]) -> None:
+        async with self._lock:
+            self._emit_to_owner(agent_id, message)
 
     async def open_spectator_feed(
         self,
@@ -211,6 +231,20 @@ class InMemoryTickEngine:
                 return existing
 
             chunk = self._chunks[self._root_chunk_id]
+            preferred = self._preferred_spawn_cell(chunk=chunk, agent_id=agent_id)
+            if preferred is not None and preferred not in chunk.occupancy:
+                entity = AgentEntity(
+                    agent_id=agent_id,
+                    chunk_id=chunk.chunk_id,
+                    x=preferred[0],
+                    y=preferred[1],
+                )
+                self._agents[agent_id] = entity
+                chunk.occupancy[preferred] = agent_id
+                chunk.agents.add(agent_id)
+                chunk.last_player_left_at = None
+                return entity
+
             for y in range(1, self.height - 1):
                 for x in range(1, self.width - 1):
                     pos = (x, y)
@@ -332,22 +366,50 @@ class InMemoryTickEngine:
             except asyncio.QueueFull:
                 pass
 
+    def _emit_to_owner(self, agent_id: str, message: Dict[str, Any]) -> None:
+        listeners = self._owner_listeners.get(agent_id, set())
+        for queue in listeners:
+            try:
+                queue.put_nowait(message)
+            except asyncio.QueueFull:
+                pass
+
+    def _emit_to_agent_and_owner(self, agent_id: str, message: Dict[str, Any]) -> None:
+        self._emit_to_agent(agent_id, message)
+        self._emit_to_owner(agent_id, message)
+
     def _emit_to_all(self, message: Dict[str, Any]) -> None:
         for agent_id in list(self._listeners.keys()):
             self._emit_to_agent(agent_id, message)
 
     def _agent_snapshots(self, chunk: ChunkState) -> List[Dict[str, Any]]:
         agents = [
-            {
-                "id": entity.agent_id,
-                "x": entity.x,
-                "y": entity.y,
-            }
+            self._agent_snapshot_from_entity(entity)
             for entity in self._agents.values()
             if entity.chunk_id == chunk.chunk_id
         ]
         agents.sort(key=lambda item: item["id"])
         return agents
+
+    def _agent_snapshot_from_entity(self, entity: AgentEntity) -> Dict[str, Any]:
+        snapshot = {
+            "id": entity.agent_id,
+            "x": entity.x,
+            "y": entity.y,
+        }
+        if entity.agent_id == self.DEMO_PLAYER_ID:
+            snapshot["name"] = "You"
+        return snapshot
+
+    def _preferred_spawn_cell(self, *, chunk: ChunkState, agent_id: str) -> Optional[Cell]:
+        if agent_id != self.DEMO_PLAYER_ID:
+            return None
+        if chunk.chunk_id != self._root_chunk_id:
+            return None
+        center = (chunk.width // 2, chunk.height // 2)
+        if not self._is_walkable(chunk, center[0], center[1]):
+            return None
+        return center
 
     def _build_demo_overlays(self, chunk: ChunkState) -> Dict[str, List[Dict[str, Any]]]:
         if chunk.chunk_id != self._root_chunk_id:
@@ -594,15 +656,15 @@ class InMemoryTickEngine:
                 }
                 if meta:
                     payload.update(meta)
-                self._emit_to_agent(cmd.agent_id, {"type": "command_result", "payload": payload})
+                self._emit_to_agent_and_owner(cmd.agent_id, {"type": "command_result", "payload": payload})
 
             for agent_id, transition_payload, to_chunk_id in transitions:
-                self._emit_to_agent(
+                self._emit_to_agent_and_owner(
                     agent_id,
                     {"type": "chunk_transition", "payload": transition_payload},
                 )
                 static_payload = self._build_chunk_static_payload(self._chunks[to_chunk_id])
-                self._emit_to_agent(
+                self._emit_to_agent_and_owner(
                     agent_id,
                     {"type": "chunk_static", "payload": static_payload},
                 )
@@ -855,11 +917,12 @@ class InMemoryTickEngine:
             },
         )
         for agent_id in list(chunk.agents):
-            self._emit_to_agent(agent_id, {"type": "chunk_delta", "payload": payload})
+            self._emit_to_agent_and_owner(agent_id, {"type": "chunk_delta", "payload": payload})
 
     def _build_chunk_delta_payload(self, chunk: ChunkState, *, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         agents = self._agent_snapshots(chunk)
         occupied = {(int(item["x"]), int(item["y"])) for item in agents}
+        known_agent_ids = {str(item["id"]) for item in agents}
 
         npcs: List[Dict[str, Any]] = []
         if self._enable_demo_actors:
@@ -869,10 +932,15 @@ class InMemoryTickEngine:
                 self._demo_overlays[chunk.chunk_id] = overlays
 
             for item in overlays.get("agents", []):
+                overlay_id = str(item.get("id", ""))
+                if overlay_id and overlay_id in known_agent_ids:
+                    continue
                 cell = (int(item["x"]), int(item["y"]))
                 if cell in occupied:
                     continue
                 agents.append(dict(item))
+                if overlay_id:
+                    known_agent_ids.add(overlay_id)
             agents.sort(key=lambda item: str(item["id"]))
 
             for item in overlays.get("npcs", []):
