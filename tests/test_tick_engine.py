@@ -303,6 +303,34 @@ class TickEngineTests(unittest.IsolatedAsyncioTestCase):
         static_payload = await engine.chunk_static_payload(chunk_id="chunk-0")
         self.assertEqual(static_payload["neighbors"], {"N": None, "E": None, "S": None, "W": None})
 
+    async def test_demo_player_prefers_root_center_spawn(self) -> None:
+        engine = InMemoryTickEngine(tick_hz=5, width=50, height=50, enable_demo_actors=True)
+        agent = await engine.ensure_agent("demo-player")
+        self.assertEqual((agent.x, agent.y), (25, 25))
+
+        delta = await engine.chunk_delta_payload(chunk_id="chunk-0")
+        demo_entries = [item for item in delta["agents"] if item["id"] == "demo-player"]
+        self.assertEqual(len(demo_entries), 1)
+        self.assertEqual(demo_entries[0].get("name"), "You")
+
+    async def test_demo_player_is_not_duplicated_after_move(self) -> None:
+        engine = InMemoryTickEngine(tick_hz=5, width=50, height=50, enable_demo_actors=True)
+        await engine.ensure_agent("demo-player")
+
+        await engine.submit_move_command(
+            agent_id="demo-player",
+            server_cmd_id="cmd-demo-move",
+            target_x=26,
+            target_y=25,
+        )
+        await engine.tick_once()
+
+        delta = await engine.chunk_delta_payload(chunk_id="chunk-0")
+        demo_entries = [item for item in delta["agents"] if item["id"] == "demo-player"]
+        self.assertEqual(len(demo_entries), 1)
+        self.assertEqual(demo_entries[0].get("name"), "You")
+        self.assertEqual((demo_entries[0]["x"], demo_entries[0]["y"]), (26, 25))
+
 
 if __name__ == "__main__":
     unittest.main()

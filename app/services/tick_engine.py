@@ -211,6 +211,20 @@ class InMemoryTickEngine:
                 return existing
 
             chunk = self._chunks[self._root_chunk_id]
+            preferred = self._preferred_spawn_cell(chunk=chunk, agent_id=agent_id)
+            if preferred is not None and preferred not in chunk.occupancy:
+                entity = AgentEntity(
+                    agent_id=agent_id,
+                    chunk_id=chunk.chunk_id,
+                    x=preferred[0],
+                    y=preferred[1],
+                )
+                self._agents[agent_id] = entity
+                chunk.occupancy[preferred] = agent_id
+                chunk.agents.add(agent_id)
+                chunk.last_player_left_at = None
+                return entity
+
             for y in range(1, self.height - 1):
                 for x in range(1, self.width - 1):
                     pos = (x, y)
@@ -338,16 +352,32 @@ class InMemoryTickEngine:
 
     def _agent_snapshots(self, chunk: ChunkState) -> List[Dict[str, Any]]:
         agents = [
-            {
-                "id": entity.agent_id,
-                "x": entity.x,
-                "y": entity.y,
-            }
+            self._agent_snapshot_from_entity(entity)
             for entity in self._agents.values()
             if entity.chunk_id == chunk.chunk_id
         ]
         agents.sort(key=lambda item: item["id"])
         return agents
+
+    def _agent_snapshot_from_entity(self, entity: AgentEntity) -> Dict[str, Any]:
+        snapshot = {
+            "id": entity.agent_id,
+            "x": entity.x,
+            "y": entity.y,
+        }
+        if entity.agent_id == self.DEMO_PLAYER_ID:
+            snapshot["name"] = "You"
+        return snapshot
+
+    def _preferred_spawn_cell(self, *, chunk: ChunkState, agent_id: str) -> Optional[Cell]:
+        if agent_id != self.DEMO_PLAYER_ID:
+            return None
+        if chunk.chunk_id != self._root_chunk_id:
+            return None
+        center = (chunk.width // 2, chunk.height // 2)
+        if not self._is_walkable(chunk, center[0], center[1]):
+            return None
+        return center
 
     def _build_demo_overlays(self, chunk: ChunkState) -> Dict[str, List[Dict[str, Any]]]:
         if chunk.chunk_id != self._root_chunk_id:
@@ -860,6 +890,7 @@ class InMemoryTickEngine:
     def _build_chunk_delta_payload(self, chunk: ChunkState, *, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         agents = self._agent_snapshots(chunk)
         occupied = {(int(item["x"]), int(item["y"])) for item in agents}
+        known_agent_ids = {str(item["id"]) for item in agents}
 
         npcs: List[Dict[str, Any]] = []
         if self._enable_demo_actors:
@@ -869,10 +900,15 @@ class InMemoryTickEngine:
                 self._demo_overlays[chunk.chunk_id] = overlays
 
             for item in overlays.get("agents", []):
+                overlay_id = str(item.get("id", ""))
+                if overlay_id and overlay_id in known_agent_ids:
+                    continue
                 cell = (int(item["x"]), int(item["y"]))
                 if cell in occupied:
                     continue
                 agents.append(dict(item))
+                if overlay_id:
+                    known_agent_ids.add(overlay_id)
             agents.sort(key=lambda item: str(item["id"]))
 
             for item in overlays.get("npcs", []):
