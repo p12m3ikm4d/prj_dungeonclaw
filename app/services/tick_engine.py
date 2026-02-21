@@ -6,6 +6,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
 
+from app.services.chunk_generation import generate_chunk_tiles
 from app.services.pathfinding import Cell, astar_path
 
 
@@ -206,6 +207,8 @@ class InMemoryTickEngine:
             for y in range(1, self.height - 1):
                 for x in range(1, self.width - 1):
                     pos = (x, y)
+                    if not self._is_walkable(chunk, x, y):
+                        continue
                     if pos not in chunk.occupancy:
                         entity = AgentEntity(
                             agent_id=agent_id,
@@ -278,7 +281,12 @@ class InMemoryTickEngine:
             start = (agent.x, agent.y)
             goal = (target_x, target_y)
 
+            if not self._is_walkable(chunk, target_x, target_y):
+                raise TickEngineError("unreachable")
+
             def is_blocked(cell: Cell) -> bool:
+                if not self._is_walkable(chunk, cell[0], cell[1]):
+                    return True
                 occ = chunk.occupancy.get(cell)
                 if occ is None:
                     return False
@@ -346,7 +354,7 @@ class InMemoryTickEngine:
                 "chunk_id": chunk.chunk_id,
                 "size": {"w": self.width, "h": self.height},
                 "tiles": list(chunk.tiles_static),
-                "legend": {".": "floor"},
+                "legend": {".": "floor", "#": "wall"},
                 "neighbors": dict(chunk.neighbors),
                 "tick_base": self._tick,
             }
@@ -462,6 +470,22 @@ class InMemoryTickEngine:
                     continue
 
                 occupant = chunk.occupancy.get((next_x, next_y))
+                if not self._is_walkable(chunk, next_x, next_y):
+                    meta = {
+                        "reason": "blocked",
+                        "blocked_at": {"x": next_x, "y": next_y},
+                        "blocker": {"id": "wall", "x": next_x, "y": next_y},
+                    }
+                    chunk_events.setdefault(chunk.chunk_id, []).append(
+                        {
+                            "type": "blocked",
+                            "by": "wall",
+                            "at": {"x": next_x, "y": next_y},
+                        }
+                    )
+                    affected_chunks.add(chunk.chunk_id)
+                    finished_cmds.append((cmd, "failed", meta))
+                    continue
                 if occupant is not None and occupant != cmd.agent_id:
                     meta = {
                         "reason": "blocked",
@@ -631,6 +655,13 @@ class InMemoryTickEngine:
         source_chunk.transition_lock_count += 1
         target_chunk: Optional[ChunkState] = None
         try:
+            if not self._is_walkable(source_chunk, boundary_cell[0], boundary_cell[1]):
+                return {
+                    "ok": False,
+                    "blocked_at": {"x": boundary_cell[0], "y": boundary_cell[1]},
+                    "blocker": {"id": "wall"},
+                }
+
             boundary_occupant = source_chunk.occupancy.get(boundary_cell)
             if boundary_occupant is not None and boundary_occupant != cmd.agent_id:
                 return {
@@ -647,6 +678,12 @@ class InMemoryTickEngine:
             target_chunk.transition_lock_count += 1
 
             to_x, to_y = self._map_destination(boundary_cell, direction)
+            if not self._is_walkable(target_chunk, to_x, to_y):
+                return {
+                    "ok": False,
+                    "blocked_at": {"x": to_x, "y": to_y},
+                    "blocker": {"id": "wall"},
+                }
             target_occupant = target_chunk.occupancy.get((to_x, to_y))
             if target_occupant is not None and target_occupant != cmd.agent_id:
                 return {
@@ -694,7 +731,9 @@ class InMemoryTickEngine:
             if existing is not None and existing in self._chunks:
                 return existing
 
-            neighbor_chunk = self._new_chunk()
+            neighbor_chunk = self._new_chunk(
+                required_edges={self.OPPOSITE_DIR[direction]},
+            )
             self._chunks[neighbor_chunk.chunk_id] = neighbor_chunk
             self._ensure_spectator_chunk(neighbor_chunk.chunk_id)
             source.neighbors[direction] = neighbor_chunk.chunk_id
@@ -873,7 +912,14 @@ class InMemoryTickEngine:
 
         return self._chunks[self._root_chunk_id]
 
-    def _new_chunk(self, chunk_id: Optional[str] = None, *, pinned: bool = False) -> ChunkState:
+    def _new_chunk(
+        self,
+        chunk_id: Optional[str] = None,
+        *,
+        pinned: bool = False,
+        seed: Optional[int] = None,
+        required_edges: Optional[Set[str]] = None,
+    ) -> ChunkState:
         now = self._clock()
         if chunk_id is None:
             self._chunk_serial += 1
@@ -884,18 +930,27 @@ class InMemoryTickEngine:
                 self._chunk_serial = max(self._chunk_serial, serial)
             except (IndexError, ValueError):
                 pass
+        chunk_seed = seed if seed is not None else (self._chunk_serial * 0x9E3779B97F4A7C15) & (
+            (1 << 64) - 1
+        )
+        tiles_static = generate_chunk_tiles(
+            width=self.width,
+            height=self.height,
+            seed=chunk_seed,
+            required_edges=required_edges or set(),
+        )
         return ChunkState(
             chunk_id=chunk_id,
             width=self.width,
             height=self.height,
-            tiles_static=["." * self.width for _ in range(self.height)],
+            tiles_static=tiles_static,
             neighbors={direction: None for direction in self.DIRECTIONS},
             occupancy={},
             agents=set(),
             created_at=now,
             last_player_left_at=now,
             pinned=pinned,
-            seed=0,
+            seed=chunk_seed,
         )
 
     def _build_chunk_static_payload(self, chunk: ChunkState) -> Dict[str, Any]:
@@ -903,7 +958,12 @@ class InMemoryTickEngine:
             "chunk_id": chunk.chunk_id,
             "size": {"w": self.width, "h": self.height},
             "tiles": list(chunk.tiles_static),
-            "legend": {".": "floor"},
+            "legend": {".": "floor", "#": "wall"},
             "neighbors": dict(chunk.neighbors),
             "tick_base": self._tick,
         }
+
+    def _is_walkable(self, chunk: ChunkState, x: int, y: int) -> bool:
+        if not (0 <= x < chunk.width and 0 <= y < chunk.height):
+            return False
+        return chunk.tiles_static[y][x] != "#"
