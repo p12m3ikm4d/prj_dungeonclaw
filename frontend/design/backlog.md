@@ -1,0 +1,21 @@
+# Frontend Backlog
+
+## Sprint 1: Foundation & Mock Server
+- [x] 프론트엔드 프로젝트 초기화 (프레임워크 선정: 예. Vite) (완료: `d09bc4d`)
+- [x] Mock 서버/스크립트 통신 환경 구성 (SSE 테스트용) (완료: `d09bc4d`)
+- [x] 기본 레이아웃 및 라우팅 설정 (완료: `d09bc4d`)
+
+## Sprint 2: Core Rendering
+- [x] Mock 데이터를 활용한 `chunk_static`, `chunk_delta` 처리 로직 구현 (완료: `bc660dc`)
+- [x] 상태 관리(Store) 및 SSE 클라이언트 연동 (완료: `bc660dc`)
+- [x] 50x50 MUD 맵 뷰어(World Viewer) MVP 렌더링 (완료: `bc660dc`)
+
+## Sprint 3: Integration & Polish
+- [x] 백엔드 연동 테스트 (실 서버와 연결) 및 Replay/Resync 구현 (완료: `3c3478d`)
+- [x] 에이전트 상태 패널 및 이벤트 로그 UI 완성 (완료: `4235f3d`)
+- [x] 시각적 피드백 개선 (이동, 충돌 등 모션 처리) (완료: `4235f3d`)
+- [x] Spectator API 라우팅 규약 준수 및 Dev 세션 토큰 발급 (완료: `463fbbc`)
+
+## Sprint 4: Render MVP & Debug Tools
+- [x] 데모 청크 렌더 규약 준수 (floor, wall, user, npc 오버레이 적용)
+- [x] 개발용 디버그 클릭 이동 기능 구현 (`POST /v1/dev/agent/move-to`) 및 에러 UI 표시

@@ -1,0 +1,57 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Backend (FastAPI)",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${config:python.defaultInterpreterPath}",
+            "module": "uvicorn",
+            "args": [
+                "app.main:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8000",
+                "--reload"
+            ],
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "type": "msedge",
+            "request": "launch",
+            "name": "Launch Frontend (Edge)",
+            "url": "http://localhost:5173",
+            "webRoot": "${workspaceFolder}/frontend",
+            "preLaunchTask": "npm: dev"
+        },
+        {
+            "type": "chrome",
+            "request": "launch",
+            "name": "Launch Frontend (Chrome)",
+            "url": "http://localhost:5173",
+            "webRoot": "${workspaceFolder}/frontend",
+            "preLaunchTask": "npm: dev"
+        },
+        {
+            "type": "msedge",
+            "request": "launch",
+            "name": "Launch Fullstack (Edge)",
+            "url": "http://localhost:5173",
+            "webRoot": "${workspaceFolder}/frontend",
+            "preLaunchTask": "frontend+backend: dev"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Debug Fullstack",
+            "configurations": [
+                "Launch Backend (FastAPI)",
+                "Launch Frontend (Edge)"
+            ]
+        }
+    ]
+}

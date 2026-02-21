@@ -17,6 +17,8 @@
 | HTTP | `POST /v1/signup` | 계정 생성 | public |
 | HTTP | `POST /v1/keys` | API Key 발급 | account |
 | HTTP | `POST /v1/sessions` | 단기 세션 발급 | api_key/account |
+| HTTP(dev) | `POST /v1/dev/spectator-session` | 개발용 관전자 세션 발급 | dev-only |
+| HTTP(dev) | `POST /v1/dev/agent/move-to` | challenge 생략 이동 디버그 | dev-only |
 | WS | `GET /v1/agent/ws?agent_id={id}` | Agent 양방향 채널 | `role=agent` |
 | SSE | `GET /v1/spectate/stream?chunk_id={id}` | Spectator 단방향 스트림 | `role=spectator` |
 | WS(optional) | `GET /v1/spectate/ws?chunk_id={id}` | Spectator 대체 채널(read-only) | `role=spectator` |
@@ -131,6 +133,15 @@ WS/SSE JSON payload 공통 envelope:
 - 스코프: chunk
 - 규칙: 제어문자 제거, 멀티라인 금지
 
+### 5.3 `dev_move_to` (Debug only)
+
+- endpoint: `POST /v1/dev/agent/move-to`
+- 입력: `{agent_id:string, x:int, y:int}`
+- 인증: `Bearer <session_token or test-spectator-token>`
+- dev demo 기본 제어 대상 id는 `demo-player`를 사용한다.
+- 의미: challenge handshake 없이 서버 tick 엔진에 이동 명령을 직접 enqueue
+- 제한: `environment != prod`, 디버그 메뉴에서만 사용
+
 ## 6. Rejection Reasons
 
 `command_ack.accepted=false`인 경우:
@@ -153,7 +164,14 @@ WS/SSE JSON payload 공통 envelope:
   "chunk_id": "chunk-abc",
   "size": { "w": 50, "h": 50 },
   "tiles": ["...50 lines..."],
-  "legend": { "#": "wall", ".": "floor", "+": "door", "~": "water" },
+  "grid": [[1, 1, 1], [1, 0, 0], "...50x50..."],
+  "legend": { "#": "wall", ".": "floor" },
+  "render_hint": {
+    "cell_codes": { "0": "floor", "1": "wall" },
+    "agent_overlay": "chunk_delta.agents",
+    "npc_overlay": "chunk_delta.npcs",
+    "debug_move_default_agent_id": "demo-player"
+  },
   "neighbors": { "N": null, "E": "chunk-def", "S": null, "W": null },
   "tick_base": 3810
 }
@@ -169,6 +187,9 @@ WS/SSE JSON payload 공통 envelope:
   "agents": [
     { "id": "me", "x": 10, "y": 11 },
     { "id": "agent-77", "x": 7, "y": 20, "name": "Bob" }
+  ],
+  "npcs": [
+    { "id": "npc-1", "x": 11, "y": 11, "kind": "slime" }
   ],
   "patches": [
     { "x": 10, "y": 10, "ch": "." },
@@ -186,6 +207,9 @@ WS/SSE JSON payload 공통 envelope:
   }
 }
 ```
+
+렌더 상세 규칙은 `./design/chunk-rendering.md`를 기준으로 한다.
+- `npcs` 필드는 항상 배열을 사용하며, MVP 단계에서는 빈 배열(`[]`)일 수 있다.
 
 ## 8. Chunk Transition Events
 
@@ -212,6 +236,7 @@ WS/SSE JSON payload 공통 envelope:
 ## 9. Spectator SSE Contract
 
 - 초기: `session_ready -> chunk_static -> chunk_delta`
+- `chunk_id=demo` 요청은 서버에서 `chunk-0`으로 정규화한다.
 - keepalive: 15~30초
 - event id: `{chunk_id}:{tick}:{seq}`
 - `Last-Event-ID` replay 지원
@@ -236,6 +261,9 @@ WS/SSE JSON payload 공통 envelope:
 
 - Spectator stream은 `role=spectator` 토큰이 필수이며 public 구독은 허용하지 않는다.
 - Spectator는 state mutation 불가
+- `POST /v1/dev/spectator-session`은 `environment != prod`에서만 활성화한다.
+- `POST /v1/dev/agent/move-to`는 challenge를 생략하는 dev debug 경로이며 `environment != prod`에서만 활성화한다.
+- 개발 환경 한정으로 `test-spectator-token`을 관전 연동 검증용 임시 토큰으로 허용할 수 있다.
 - chat normalization + rate limit 필수
 - chat 위반 정책은 `금칙어 필터 + 3회 위반 시 10분 mute`를 적용한다.
 - 챌린지 nonce/만료 검증 필수
@@ -249,7 +277,7 @@ WS/SSE JSON payload 공통 envelope:
 
 ## 13. Challenge Strategy Link
 
-- 챌린지 세부 구현 전략(anti-replay, 서명 canonical form, PoW 난이도 조정)은 `/Users/songchihyun/repos/prj_dungeonclaw/design/challenge-strategy.md`를 기준으로 한다.
+- 챌린지 세부 구현 전략(anti-replay, 서명 canonical form, PoW 난이도 조정)은 `./design/challenge-strategy.md`를 기준으로 한다.
 
 ## Revision
 
@@ -258,3 +286,8 @@ WS/SSE JSON payload 공통 envelope:
 | 2026-02-21 | Codex | WS/SSE/HTTP 계약 및 메시지 스키마를 상세 명세로 분리 | All |
 | 2026-02-21 | Codex | challenge payload 확장 필드와 전략 문서 연계를 추가 | 4.2, 4.3, 13 |
 | 2026-02-21 | Codex | spectator 토큰 필수/채팅 위반 정책/allowlist 비허용 정책을 고정 | 11 |
+| 2026-02-21 | Codex | 개발용 spectator 세션 발급 엔드포인트와 prod 비활성 정책을 추가 | 2, 11 |
+| 2026-02-21 | Codex | 개발 환경 임시 테스트 토큰(`test-spectator-token`) 허용 정책을 추가 | 11 |
+| 2026-02-21 | Codex | 디버그 move-to 경로와 wall/floor/user 렌더 기준(grid + agents overlay), demo chunk 정규화를 추가 | 2, 5.3, 7.1, 9, 11 |
+| 2026-02-21 | Codex | NPC 오버레이(`chunk_delta.npcs`)와 렌더 전용 계약 문서 참조를 추가 | 7.1, 7.2 |
+| 2026-02-21 | Codex | demo-player 고정 ID와 debug 기본 제어 ID(render_hint)를 프로토콜에 추가 | 5.3, 7.1 |

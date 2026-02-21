@@ -14,44 +14,48 @@
 
 설계 문서는 `design/` 폴더로 통합되었습니다.
 
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/index.md`
+- `./design/index.md`
   - 설계 산출물 인덱스 + legacy 매핑
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/component.md`
+- `./design/component.md`
   - 컴포넌트 구조/경계/배포
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/class.md`
+- `./design/class.md`
   - 도메인/서비스 클래스 설계
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/sequence.md`
+- `./design/sequence.md`
   - 핵심 시퀀스 플로우
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/erd.md`
+- `./design/erd.md`
   - DB ERD + 인덱싱/보관 정책
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/protocol.md`
+- `./design/protocol.md`
   - API/WS/SSE 메시지 계약
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/simulation.md`
+- `./design/chunk-rendering.md`
+  - 청크 렌더 요소(벽/땅/유저/npc) 해석 계약
+- `./design/simulation.md`
   - 틱/청크/경계/GC/경로 규칙
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/challenge-strategy.md`
+- `./design/challenge-strategy.md`
   - challenge 생성/검증/anti-replay/PoW/난이도 정책
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/deployment.md`
+- `./design/deployment.md`
   - Windows 서버 기준 Docker Compose 배포 전략
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/backlog.md`
+- `./design/backlog.md`
   - 구현 착수 백로그(스프린트/우선순위/완료조건)
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/branch-policy.md`
+- `./design/milestones.md`
+  - 스프린트 완료 증적(커밋 해시) 마일스톤 원장
+- `./design/branch-policy.md`
   - Codex/Backend 브랜치/커밋/PR 협업 규약
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/interface.md`
+- `./design/interface.md`
   - 구현용 인터페이스 기준 문서
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/revision-guideline.md`
+- `./design/revision-guideline.md`
   - 리비전 섹션 작성 규칙
 
 참고 문서(이관):
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/architecture.md`
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/planning.md`
-- `/Users/songchihyun/repos/prj_dungeonclaw/design/design.md` (superseded entry)
+- `./design/architecture.md`
+- `./design/planning.md`
+- `./design/design.md` (superseded entry)
 
 배포 자동화 스크립트:
-- `/Users/songchihyun/repos/prj_dungeonclaw/deploy/scripts/bootstrap.ps1`
-- `/Users/songchihyun/repos/prj_dungeonclaw/deploy/scripts/deploy.ps1`
-- `/Users/songchihyun/repos/prj_dungeonclaw/deploy/scripts/update.ps1`
-- `/Users/songchihyun/repos/prj_dungeonclaw/deploy/scripts/smoke-test.ps1`
-- `/Users/songchihyun/repos/prj_dungeonclaw/deploy/scripts/backup.ps1`
+- `./deploy/scripts/bootstrap.ps1`
+- `./deploy/scripts/deploy.ps1`
+- `./deploy/scripts/update.ps1`
+- `./deploy/scripts/smoke-test.ps1`
+- `./deploy/scripts/backup.ps1`
 
 ---
 
@@ -81,7 +85,7 @@
 
 ### 2) 인터페이스 소스 오브 트루스
 
-- 외부 계약의 기준 문서는 `/Users/songchihyun/repos/prj_dungeonclaw/design/interface.md`입니다.
+- 외부 계약의 기준 문서는 `./design/interface.md`입니다.
 - 구현 중 계약 변경이 필요하면 먼저 `design/interface.md`를 갱신한 뒤 코드에 반영합니다.
 
 ### 3) 권위 상태(authoritative state) 보존
@@ -106,10 +110,10 @@
 
 ## 로컬 환경
 
-가상환경은 이미 준비되어 있습니다: `/Users/songchihyun/repos/prj_dungeonclaw/.venv`
+가상환경은 이미 준비되어 있습니다: `./.venv`
 
 ```bash
-cd /Users/songchihyun/repos/prj_dungeonclaw
+cd ./
 source .venv/bin/activate
 ```
 
