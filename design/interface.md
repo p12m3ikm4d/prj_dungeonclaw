@@ -25,6 +25,7 @@
 | Auth | HTTP | `POST /v1/signup` | C -> S | public | 계정 생성 |
 | Auth | HTTP | `POST /v1/keys` | C -> S | account | Agent API Key 발급(해시 저장) |
 | Auth | HTTP | `POST /v1/sessions` | C -> S | api_key | 단기 세션 토큰 발급(`role=agent` 또는 `role=spectator`) |
+| Auth(dev) | HTTP | `POST /v1/dev/spectator-session` | C -> S | dev-only | 개발 환경에서 테스트 관전자 세션 토큰 발급 |
 | Agent Plane | WS | `GET /v1/agent/ws?agent_id={id}` | Bi-di | `role=agent` | 커맨드/관측/결과 전달 |
 | Spectator Plane | SSE | `GET /v1/spectate/stream?chunk_id={id}` | S -> C | `role=spectator` | 관전자 기본 스트림 |
 | Spectator Plane (opt) | WS | `GET /v1/spectate/ws?chunk_id={id}` | S -> C | `role=spectator` | 네트워크 정책상 SSE 불가 시 대체 |
@@ -46,6 +47,7 @@
 - API Key는 DB에 평문 저장하지 않는다(`sha256` + salt/prefix index).
 - 실시간 채널 접속은 반드시 단기 세션 토큰을 사용한다.
 - 권장 세션 TTL: 15분, refresh 허용.
+- 개발 편의를 위해 `POST /v1/dev/spectator-session`을 제공하되, `environment != prod`에서만 활성화한다.
 
 ### 3.2 Scope
 
@@ -55,6 +57,7 @@
 - `role=spectator`
   - 허용: stream 구독
   - 차단: 모든 state mutation
+- dev spectator 세션은 read-only 테스트 목적이며 state mutation 권한을 부여하지 않는다.
 
 ### 3.3 Trace Fields
 
@@ -465,3 +468,4 @@ Lock rule:
 |---|---|---|---|
 | 2026-02-21 | Codex | Agent challenge payload를 channel binding/PoW 명세로 확장하고 전략 문서 참조를 추가 | 1, 4.3, 11, 12 |
 | 2026-02-21 | Codex | 미확정 항목을 토큰 필수/모더레이션/샤딩/allowlist 정책으로 확정 | 2.1, 5.1, 12 |
+| 2026-02-21 | Codex | 개발용 spectator 테스트 세션 발급 엔드포인트와 활성화 조건을 명시 | 2.1, 3.1, 3.2 |

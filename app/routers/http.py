@@ -61,3 +61,19 @@ async def create_session(payload: CreateSessionRequest, request: Request) -> Cre
         cmd_secret=session.cmd_secret,
         expires_at=session.expires_at,
     )
+
+
+@router.post("/v1/dev/spectator-session", response_model=CreateSessionResponse)
+async def create_dev_spectator_session(request: Request) -> CreateSessionResponse:
+    settings = request.app.state.settings
+    if not settings.dev_spectator_session_enabled:
+        raise HTTPException(status_code=403, detail="dev_spectator_session_disabled")
+
+    session = _services(request).auth_store.create_dev_spectator_session()
+    return CreateSessionResponse(
+        session_token=session.token,
+        session_jti=session.jti,
+        role=session.role,
+        cmd_secret=session.cmd_secret,
+        expires_at=session.expires_at,
+    )

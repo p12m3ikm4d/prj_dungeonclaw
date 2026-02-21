@@ -17,6 +17,7 @@
 | HTTP | `POST /v1/signup` | 계정 생성 | public |
 | HTTP | `POST /v1/keys` | API Key 발급 | account |
 | HTTP | `POST /v1/sessions` | 단기 세션 발급 | api_key/account |
+| HTTP(dev) | `POST /v1/dev/spectator-session` | 개발용 관전자 세션 발급 | dev-only |
 | WS | `GET /v1/agent/ws?agent_id={id}` | Agent 양방향 채널 | `role=agent` |
 | SSE | `GET /v1/spectate/stream?chunk_id={id}` | Spectator 단방향 스트림 | `role=spectator` |
 | WS(optional) | `GET /v1/spectate/ws?chunk_id={id}` | Spectator 대체 채널(read-only) | `role=spectator` |
@@ -236,6 +237,7 @@ WS/SSE JSON payload 공통 envelope:
 
 - Spectator stream은 `role=spectator` 토큰이 필수이며 public 구독은 허용하지 않는다.
 - Spectator는 state mutation 불가
+- `POST /v1/dev/spectator-session`은 `environment != prod`에서만 활성화한다.
 - chat normalization + rate limit 필수
 - chat 위반 정책은 `금칙어 필터 + 3회 위반 시 10분 mute`를 적용한다.
 - 챌린지 nonce/만료 검증 필수
@@ -258,3 +260,4 @@ WS/SSE JSON payload 공통 envelope:
 | 2026-02-21 | Codex | WS/SSE/HTTP 계약 및 메시지 스키마를 상세 명세로 분리 | All |
 | 2026-02-21 | Codex | challenge payload 확장 필드와 전략 문서 연계를 추가 | 4.2, 4.3, 13 |
 | 2026-02-21 | Codex | spectator 토큰 필수/채팅 위반 정책/allowlist 비허용 정책을 고정 | 11 |
+| 2026-02-21 | Codex | 개발용 spectator 세션 발급 엔드포인트와 prod 비활성 정책을 추가 | 2, 11 |

@@ -16,6 +16,39 @@ def _find_pow_nonce(nonce: str, cmd_hash: str, difficulty: int) -> str:
 
 
 class ApiWsFlowTests(unittest.TestCase):
+    def test_dev_spectator_session_and_cors_preflight(self) -> None:
+        with TestClient(app) as client:
+            preflight = client.options(
+                "/healthz",
+                headers={
+                    "Origin": "http://localhost:5173",
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+            self.assertIn(preflight.status_code, (200, 204))
+            self.assertEqual(
+                preflight.headers.get("access-control-allow-origin"),
+                "http://localhost:5173",
+            )
+
+            dev_session = client.post("/v1/dev/spectator-session")
+            self.assertEqual(dev_session.status_code, 200)
+            payload = dev_session.json()
+            self.assertEqual(payload["role"], "spectator")
+            self.assertTrue(payload["session_token"].startswith("sess_"))
+            self.assertTrue(payload["session_jti"].startswith("jti_"))
+
+    def test_dev_spectator_session_can_be_disabled(self) -> None:
+        original = app.state.settings.enable_dev_spectator_session
+        app.state.settings.enable_dev_spectator_session = False
+        try:
+            with TestClient(app) as client:
+                response = client.post("/v1/dev/spectator-session")
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json()["detail"], "dev_spectator_session_disabled")
+        finally:
+            app.state.settings.enable_dev_spectator_session = original
+
     def test_signup_to_ws_handshake_flow(self) -> None:
         with TestClient(app) as client:
             signup = client.post(

@@ -99,18 +99,35 @@ class InMemoryAuthStore:
             if key_record is None:
                 raise AuthError("invalid_api_key")
 
-            issued_at = int(time.time())
-            session = Session(
-                token=f"sess_{secrets.token_urlsafe(24)}",
-                jti=f"jti_{uuid.uuid4().hex}",
+            session = self._issue_session(
                 account_id=key_record.account_id,
                 role=role,
                 agent_id=agent_id,
-                cmd_secret=secrets.token_urlsafe(32),
-                expires_at=issued_at + self._session_ttl_seconds,
             )
             self._sessions_by_token[session.token] = session
             return session
+
+    def create_dev_spectator_session(self) -> Session:
+        with self._lock:
+            session = self._issue_session(
+                account_id="acc_dev_spectator",
+                role="spectator",
+                agent_id=None,
+            )
+            self._sessions_by_token[session.token] = session
+            return session
+
+    def _issue_session(self, account_id: str, role: str, agent_id: Optional[str]) -> Session:
+        issued_at = int(time.time())
+        return Session(
+            token=f"sess_{secrets.token_urlsafe(24)}",
+            jti=f"jti_{uuid.uuid4().hex}",
+            account_id=account_id,
+            role=role,
+            agent_id=agent_id,
+            cmd_secret=secrets.token_urlsafe(32),
+            expires_at=issued_at + self._session_ttl_seconds,
+        )
 
     def get_session(self, token: str) -> Optional[Session]:
         with self._lock:
