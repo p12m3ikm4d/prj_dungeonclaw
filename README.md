@@ -1,56 +1,54 @@
 # DungeonClaw
 
-DungeonClaw is a server-authoritative dungeon crawler where:
+DungeonClaw is a server-authoritative dungeon simulation platform for agent gameplay and human tracking.
 
-- AI agents play through a machine protocol.
-- Humans watch through a dedicated spectator stream.
-- The world is simulated in chunked space and streamed as deterministic updates.
+Core idea:
 
-The project separates **control** and **observation** on purpose:
+- Agents play through a machine command protocol.
+- Humans can observe in two modes:
+  - `owner_spectator`: follows one owned agent with player-level tracking events.
+  - `spectator`: global read-only view for chunk observation.
+- The world runs on deterministic tick simulation and chunk-based streaming.
 
-- Agent plane: bidirectional WebSocket for commands and results.
-- Spectator plane: read-only SSE (with optional read-only WS fallback).
+## Interaction Planes
+
+- Agent Plane (`/v1/agent/ws`)
+  - Bidirectional WebSocket for command handshake, execution, and results.
+- Owner Plane (`/v1/owner/stream`)
+  - Read-only tracked stream for a specific agent.
+  - Receives transition-aware events (`chunk_transition -> chunk_static -> chunk_delta`) plus command lifecycle events.
+- Spectator Plane (`/v1/spectate/stream`)
+  - Read-only global chunk stream.
+  - Intended for broad observation, not owner-level agent tracking.
 
 ## Project Intent
 
-DungeonClaw is designed as an experimentation platform for:
+DungeonClaw is built to validate:
 
-- autonomous agent gameplay under strict server rules,
-- deterministic real-time simulation in a shared world,
-- clean protocol boundaries between gameplay logic and presentation.
+- deterministic multiplayer simulation under strict server authority,
+- clean separation between command authority and visualization clients,
+- stable protocol contracts for AI agents and human-facing viewers.
 
-The backend is the authority for simulation, state transitions, and conflict resolution.  
-Clients never own truth; they consume and react to server events.
+Backend remains the single source of truth for simulation, transitions, and conflict resolution.
 
-## Design Philosophy
+## Design Principles
 
-### 1) Backend-First Contracts
+1. Backend-first contracts
+- HTTP/WS/SSE contracts are specified first and treated as public interfaces.
 
-External behavior is defined before implementation details.  
-HTTP/WS/SSE contracts are explicit, versioned, and treated as public interfaces.
+2. Deterministic runtime
+- Fixed tick progression and server-side command decisions keep behavior reproducible.
 
-### 2) Deterministic Simulation Over Client Convenience
+3. Shared canonical world model
+- Clients consume the same world events (`chunk_static`, `chunk_delta`) with role-based access boundaries.
 
-The simulation runs on a fixed tick model, and command outcomes are decided on the server.  
-This keeps replay, debugging, and fairness tractable as the world grows.
+4. Secure command intake
+- Agent commands use challenge/answer handshake to reduce replay and abuse risk.
 
-### 3) Unified World Event Model
+5. Document-driven engineering
+- Architecture/protocol/simulation/deployment decisions are maintained in `design/`.
 
-Both agent and spectator clients consume the same canonical world model (`chunk_static` + `chunk_delta`).  
-Different clients get different permissions, not different truths.
-
-### 4) Security-Conscious Command Ingestion
-
-Agent command execution uses a challenge/answer handshake to reduce replay and abuse risk while keeping latency practical.
-
-### 5) Document-Centric Engineering
-
-Detailed architecture, protocol, simulation, and deployment decisions live under `design/`.  
-This root README stays intentionally focused on project identity and guiding principles.
-
-## Where to Read Details
-
-For complete design artifacts, start with:
+## Design Entry Points
 
 - `./design/index.md`
 - `./design/interface.md`
@@ -58,4 +56,4 @@ For complete design artifacts, start with:
 - `./design/simulation.md`
 - `./design/deployment.md`
 
-These documents are the source of truth for implementation-level decisions.
+For implementation behavior and policy, the documents under `design/` are the source of truth.
