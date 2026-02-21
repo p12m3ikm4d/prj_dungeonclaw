@@ -18,8 +18,8 @@
 | M3-FE-SPRINT1 | 프론트엔드 초기화 및 Mock 관전 환경 | Done | `d09bc4d` | `antigravity/frontend-init` | Vite/Vue 기반 관전 UI 초기 골격 |
 | M4-INTEGRATION-S1 | Sprint1 통합 머지(`develop`) | Done | `d7a4984` | `develop` | codex + antigravity 통합 및 충돌 해소 |
 | M5-AGENT-COLLAB | 에이전트 협업 채널 문서 추가 | Done | `99f3356` | `develop` | `.agent/FOR_ANTIGRAVITY.md`, `.agent/FOR_CODEX.md` 추가 |
-| M6-BE-SPRINT3 | Boundary + Chunk Lifecycle | Planned | TBD | `develop` (target) | 원자 전환/neighbor lock/GC 구현 예정 |
-| M7-BE-SPRINT4 | Spectator Streaming Hardening | Planned | TBD | `develop` (target) | SSE replay/resync 및 read-only 보강 예정 |
+| M6-BE-SPRINT3 | Boundary + Chunk Lifecycle | Done | `ef3f93b` | `develop` | 원자 전환/neighbor lock/GC 기본 구현 완료 |
+| M7-BE-SPRINT4 | Spectator Streaming Hardening | Done (P0) | `27a1dbb` | `codex/sprint4-sse-streaming` | SSE stream/replay/resync/snapshot/read-only 구현, Spectator WS fallback(P1)은 후속 |
 | M8-BE-SPRINT5 | Operational Hardening | Planned | TBD | `develop` (target) | rate limit/moderation/운영 복구 절차 점검 예정 |
 
 ## 3. Update Procedure
@@ -39,3 +39,4 @@
 | Date | Author | Summary | Impacted Sections |
 |---|---|---|---|
 | 2026-02-21 | Codex | 스프린트별 완료 증적 커밋을 추적하는 마일스톤 원장 문서 신설 | All |
+| 2026-02-21 | Codex | Sprint3/4 백엔드 구현 증적 커밋을 반영하고 Sprint4 상태를 P0 완료로 갱신 | 2 |
