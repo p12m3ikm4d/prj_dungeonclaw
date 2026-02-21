@@ -29,3 +29,8 @@
 - [x] 전체 맵 대신 플레이어 중심의 `10x10` FOV 카메라 렌더링 범위 제한 (`viewportBounds` 계산 구현)
 - [x] `32x32px` 도트 아트 느낌의 Floor/Wall 렌더링용 임시 SVG 텍스쳐 적용
 - [x] 모니터 DPI / 브라우저 해상도에 무관하게 그래픽이 뭉개지지 않도록 CSS 정수 스케일링(`image-rendering: pixelated`) 적용
+
+## Sprint 7: Extract Assets & Fix Chunk Follow
+- [x] 임시 SVG 타일 이미지를 별도 에셋 파일(`frontend/src/assets/wall.svg`, `floor.svg`)로 완전 분리.
+- [x] **버그 픽스**: 제어 대상이 청크 경계 밖으로 이동하여 `chunk_delta`에서 사라질 경우(Spectator에게 `chunk_transition` 이벤트가 직접 오지 않는 한계 우회), 증발 직전 좌표와 `neighbors` 데이터를 대조해 대상이 이동한 새 청크로 SSE를 자동 전환하도록 방향 추론 로직 구현.
+- [x] **UX 보완**: 마우스 클릭 외에도 손쉽게 맵 끝(청크 경계)으로 이동해 전환을 테스트할 수 있도록 WASD 및 방향키(Arrow keys) 키보드 조작 기능 추가.

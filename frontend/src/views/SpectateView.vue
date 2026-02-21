@@ -22,6 +22,9 @@ const CHUNK_W = 50;
 const CHUNK_H = 50;
 
 // Computed Viewport Bounds
+const neighbors = ref<Record<string, string | null>>({})
+const lastKnownPlayerPos = ref<{x: number, y: number} | null>(null)
+
 const viewportBounds = computed(() => {
   let playerX = 25;
   let playerY = 25;
@@ -122,6 +125,7 @@ const connectSSE = (chunkId: string = 'demo') => {
         } else if (data.type === 'chunk_static') {
           currentChunk.value = data.chunk_id
           grid.value = data.grid || Array(50).fill(Array(50).fill(0))
+          neighbors.value = data.neighbors || {}
           if (data.render_hint?.debug_move_default_agent_id) {
             debugMoveAgentId.value = data.render_hint.debug_move_default_agent_id
           }
@@ -131,6 +135,30 @@ const connectSSE = (chunkId: string = 'demo') => {
           currentTick.value = data.tick
           agents.value = data.agents || []
           npcs.value = data.npcs || []
+          
+          const player = agents.value.find((a: any) => a.id === debugMoveAgentId.value) || 
+                         npcs.value.find((n: any) => n.id === debugMoveAgentId.value);
+          
+          if (player) {
+            lastKnownPlayerPos.value = { x: player.x, y: player.y };
+          } else if (lastKnownPlayerPos.value) {
+            // Player vanished! Infer transition
+            const { x, y } = lastKnownPlayerPos.value;
+            let nextDir = null;
+            if (x === 49) nextDir = 'E';
+            if (x === 0) nextDir = 'W';
+            if (y === 0) nextDir = 'N';
+            if (y === 49) nextDir = 'S';
+
+            if (nextDir && neighbors.value[nextDir]) {
+              addLog(`Target vanished at edge ${nextDir}. Switching to ${neighbors.value[nextDir]}...`);
+              setTimeout(() => connectSSE(neighbors.value[nextDir] as string), 100);
+            } else {
+              addLog(`Target vanished at (${x},${y}), but no known neighbor / not at edge.`);
+            }
+            lastKnownPlayerPos.value = null; // clear after triggering
+          }
+
           if (data.events && data.events.length > 0) {
             data.events.forEach((ev: any) => {
               addLog(`[Event] ${ev.type} from ${ev.from || ev.by || 'unknown'}`)
@@ -275,6 +303,7 @@ const handleCellClick = async (x: number, y: number) => {
 
 
 
+
 const initSpectatorSession = async () => {
   try {
     addLog('Requesting dev spectator session token...')
@@ -295,7 +324,25 @@ const initSpectatorSession = async () => {
   return false
 }
 
+const handleKeyDown = (e: KeyboardEvent) => {
+  if (!isConnected.value || !spectatorToken.value) return;
+  const player = agents.value.find((a: any) => a.id === debugMoveAgentId.value) || 
+                 npcs.value.find((n: any) => n.id === debugMoveAgentId.value);
+  if (!player) return;
+
+  let dx = 0; let dy = 0;
+  if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') dy = -1;
+  else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') dy = 1;
+  else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') dx = -1;
+  else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') dx = 1;
+
+  if (dx !== 0 || dy !== 0) {
+    handleCellClick(player.x + dx, player.y + dy);
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener('keydown', handleKeyDown);
   addLog('Initializing spectator stream...')
   const success = await initSpectatorSession()
   if (success) {
@@ -304,6 +351,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown);
   if (abortController) {
     abortController.abort()
   }
@@ -507,11 +555,11 @@ onUnmounted(() => {
 }
 /* 32x32 Stone Wall Texture */
 .grid-cell.wall {
-  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="%232d313f"/><rect x="0" y="0" width="16" height="8" fill="%233b4252"/><rect x="17" y="0" width="15" height="8" fill="%233b4252"/><rect x="0" y="9" width="8" height="8" fill="%231a1d27"/><rect x="9" y="9" width="23" height="8" fill="%231a1d27"/><rect x="0" y="18" width="16" height="8" fill="%233b4252"/><rect x="17" y="18" width="15" height="8" fill="%233b4252"/><rect x="0" y="27" width="8" height="5" fill="%231a1d27"/><rect x="9" y="27" width="23" height="5" fill="%231a1d27"/></svg>');
+  background-image: url('@/assets/wall.svg');
 }
 /* 32x32 Dirt Floor Texture */
 .grid-cell.empty {
-  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="%2312151e"/><rect x="4" y="4" width="2" height="2" fill="%231a1d27"/><rect x="18" y="8" width="4" height="2" fill="%231a1d27"/><rect x="8" y="24" width="2" height="4" fill="%231a1d27"/><rect x="24" y="20" width="4" height="4" fill="%230f111a"/></svg>');
+  background-image: url('@/assets/floor.svg');
 }
 
 /* Agent & NPC rendering layer */
