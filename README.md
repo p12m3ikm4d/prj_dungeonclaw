@@ -34,6 +34,8 @@
   - Windows 서버 기준 Docker Compose 배포 전략
 - `/Users/songchihyun/repos/prj_dungeonclaw/design/backlog.md`
   - 구현 착수 백로그(스프린트/우선순위/완료조건)
+- `/Users/songchihyun/repos/prj_dungeonclaw/design/milestones.md`
+  - 스프린트 완료 증적(커밋 해시) 마일스톤 원장
 - `/Users/songchihyun/repos/prj_dungeonclaw/design/branch-policy.md`
   - Codex/Backend 브랜치/커밋/PR 협업 규약
 - `/Users/songchihyun/repos/prj_dungeonclaw/design/interface.md`

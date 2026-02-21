@@ -2,6 +2,12 @@
 
 본 백로그는 현재 설계 산출물을 기준으로 구현 착수 순서를 고정한다.
 
+## 0. Progress Snapshot Rule
+
+- 스프린트 정의는 본 문서를 기준으로 유지한다.
+- 스프린트 완료 증적(커밋 해시)은 `design/milestones.md`를 기준으로 관리한다.
+- `Done` 선언은 마일스톤 원장에 `Evidence Commit`이 등록된 시점으로 본다.
+
 ## 1. Sprint 0 (Infrastructure and Skeleton)
 
 ### P0
@@ -107,3 +113,4 @@
 | Date | Author | Summary | Impacted Sections |
 |---|---|---|---|
 | 2026-02-21 | Codex | 설계 완료 이후 구현 착수용 백로그(스프린트/우선순위/완료조건) 작성 | All |
+| 2026-02-21 | Codex | 스프린트 완료 판정 기준을 마일스톤 원장 연동 방식으로 명확화 | 0 |
