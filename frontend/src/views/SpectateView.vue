@@ -15,6 +15,7 @@ const agents = ref<any[]>([])
 let abortController: AbortController | null = null
 // lastEventId is tracked by fetchEventSource internally, but we can keep a ref if we need it for UI
 const lastEventId = ref<string | null>(null)
+const spectatorToken = ref<string | null>(null)
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'
 
@@ -38,12 +39,17 @@ const connectSSE = (chunkId: string = 'demo') => {
   }
   abortController = new AbortController()
 
-  const url = `${API_BASE_URL}/api/v1/spectate/stream?chunk_id=${chunkId}`
+  if (!spectatorToken.value) {
+    addLog('No spectator token available. Cannot connect.')
+    return
+  }
+
+  const url = `${API_BASE_URL}/v1/spectate/stream?chunk_id=${chunkId}`
   
   fetchEventSource(url, {
     method: 'GET',
     headers: {
-      'Authorization': 'Bearer test-spectator-token',
+      'Authorization': `Bearer ${spectatorToken.value}`,
       'Accept': 'text/event-stream'
     },
     signal: abortController.signal,
@@ -108,7 +114,7 @@ const fetchSnapshot = async (snapshotUrl: string) => {
   try {
     const res = await fetch(`${API_BASE_URL}${snapshotUrl}`, {
       headers: {
-        'Authorization': 'Bearer test-spectator-token'
+        'Authorization': `Bearer ${spectatorToken.value || ''}`
       }
     })
     if (res.ok) {
@@ -133,9 +139,33 @@ const getAgentsAt = (x: number, y: number) => {
   return agents.value.filter(a => a.x === x && a.y === y)
 }
 
-onMounted(() => {
+
+const initSpectatorSession = async () => {
+  try {
+    addLog('Requesting dev spectator session token...')
+    const res = await fetch(`${API_BASE_URL}/v1/dev/spectator-session`, {
+      method: 'POST'
+    })
+    if (res.ok) {
+      const data = await res.json()
+      spectatorToken.value = data.token || data.session_token || data.access_token
+      addLog('Session token acquired.')
+      return true
+    } else {
+      addLog(`Failed to acquire token: ${res.status}`)
+    }
+  } catch (err: any) {
+    addLog(`Error acquiring token: ${err?.message}`)
+  }
+  return false
+}
+
+onMounted(async () => {
   addLog('Initializing spectator stream...')
-  connectSSE()
+  const success = await initSpectatorSession()
+  if (success) {
+    connectSSE()
+  }
 })
 
 onUnmounted(() => {
