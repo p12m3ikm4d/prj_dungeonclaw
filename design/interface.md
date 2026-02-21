@@ -48,6 +48,7 @@
 - 실시간 채널 접속은 반드시 단기 세션 토큰을 사용한다.
 - 권장 세션 TTL: 15분, refresh 허용.
 - 개발 편의를 위해 `POST /v1/dev/spectator-session`을 제공하되, `environment != prod`에서만 활성화한다.
+- 개발 환경에서는 관전 연동 점검용으로 `test-spectator-token` 고정 토큰을 임시 허용할 수 있다.
 
 ### 3.2 Scope
 
@@ -469,3 +470,4 @@ Lock rule:
 | 2026-02-21 | Codex | Agent challenge payload를 channel binding/PoW 명세로 확장하고 전략 문서 참조를 추가 | 1, 4.3, 11, 12 |
 | 2026-02-21 | Codex | 미확정 항목을 토큰 필수/모더레이션/샤딩/allowlist 정책으로 확정 | 2.1, 5.1, 12 |
 | 2026-02-21 | Codex | 개발용 spectator 테스트 세션 발급 엔드포인트와 활성화 조건을 명시 | 2.1, 3.1, 3.2 |
+| 2026-02-21 | Codex | 개발 환경에서 임시 고정 테스트 관전자 토큰 허용 정책을 추가 | 3.1 |

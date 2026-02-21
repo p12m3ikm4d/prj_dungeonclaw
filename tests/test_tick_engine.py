@@ -217,6 +217,59 @@ class TickEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(first_chunk_id, second_chunk_id)
         self.assertTrue(await engine.has_chunk(second_chunk_id))
 
+    async def test_spectator_replay_and_resync_policy(self) -> None:
+        engine = InMemoryTickEngine(tick_hz=5, width=10, height=10, sse_replay_max_events=2)
+        await engine.ensure_agent("a1")
+
+        feed = await engine.open_spectator_feed(chunk_id="chunk-0", last_event_id=None)
+        queue = feed["queue"]
+
+        await engine.submit_move_command(
+            agent_id="a1",
+            server_cmd_id="cmd-replay",
+            target_x=3,
+            target_y=1,
+        )
+        await engine.tick_once()
+        first_event = await queue.get()
+        await engine.tick_once()
+        second_event = await queue.get()
+
+        await engine.unregister_spectator_listener("chunk-0", queue)
+
+        replay_feed = await engine.open_spectator_feed(
+            chunk_id="chunk-0",
+            last_event_id=first_event["id"],
+        )
+        self.assertFalse(replay_feed["resync_required"])
+        self.assertGreaterEqual(len(replay_feed["replay_events"]), 1)
+        self.assertEqual(replay_feed["replay_events"][0]["id"], second_event["id"])
+        await engine.unregister_spectator_listener("chunk-0", replay_feed["queue"])
+
+        resync_feed = await engine.open_spectator_feed(
+            chunk_id="chunk-0",
+            last_event_id="chunk-0:0:0000",
+        )
+        self.assertTrue(resync_feed["resync_required"])
+        await engine.unregister_spectator_listener("chunk-0", resync_feed["queue"])
+
+    async def test_chunk_snapshot_returns_static_and_latest_delta(self) -> None:
+        engine = InMemoryTickEngine(tick_hz=5, width=10, height=10)
+        await engine.ensure_agent("a1")
+        await engine.submit_move_command(
+            agent_id="a1",
+            server_cmd_id="cmd-snapshot",
+            target_x=2,
+            target_y=1,
+        )
+        await engine.tick_once()
+
+        snapshot = await engine.chunk_snapshot_payload(chunk_id="chunk-0")
+        self.assertIn("chunk_static", snapshot)
+        self.assertIn("latest_delta", snapshot)
+        self.assertEqual(snapshot["chunk_static"]["chunk_id"], "chunk-0")
+        self.assertEqual(snapshot["latest_delta"]["chunk_id"], "chunk-0")
+
 
 if __name__ == "__main__":
     unittest.main()
