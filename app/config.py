@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     tick_hz: int = 5
     chunk_width: int = 50
     chunk_height: int = 50
+    chunk_gc_ttl_seconds: int = 60
 
 
 @lru_cache(maxsize=1)

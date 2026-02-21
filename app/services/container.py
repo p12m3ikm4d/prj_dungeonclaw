@@ -25,5 +25,6 @@ def build_container(settings: Settings) -> ServiceContainer:
             tick_hz=settings.tick_hz,
             width=settings.chunk_width,
             height=settings.chunk_height,
+            chunk_gc_ttl_seconds=settings.chunk_gc_ttl_seconds,
         ),
     )

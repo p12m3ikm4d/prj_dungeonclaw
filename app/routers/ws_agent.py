@@ -70,8 +70,16 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
             "role": "agent",
         },
     )
-    await _send(websocket, "chunk_static", await services.tick_engine.chunk_static_payload())
-    await _send(websocket, "chunk_delta", await services.tick_engine.chunk_delta_payload())
+    await _send(
+        websocket,
+        "chunk_static",
+        await services.tick_engine.chunk_static_payload(agent_id=agent_id),
+    )
+    await _send(
+        websocket,
+        "chunk_delta",
+        await services.tick_engine.chunk_delta_payload(agent_id=agent_id),
+    )
 
     try:
         while True:
