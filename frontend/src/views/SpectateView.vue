@@ -12,6 +12,8 @@ const currentTick = ref<number>(0)
 const grid = ref<number[][]>([])
 const agents = ref<any[]>([])
 const npcs = ref<any[]>([])
+const goldNodes = ref<any[]>([])
+const inventory = ref<Record<string, number>>({})
 const floatingEvents = ref<any[]>([])
 const debugMoveAgentId = ref<string>('demo-player')
 
@@ -23,7 +25,6 @@ const CHUNK_H = 50;
 
 // Computed Viewport Bounds
 const neighbors = ref<Record<string, string | null>>({})
-const lastKnownPlayerPos = ref<{x: number, y: number} | null>(null)
 
 const viewportBounds = computed(() => {
   let playerX = 25;
@@ -83,7 +84,7 @@ const addLog = (msg: string) => {
   scrollToBottom()
 }
 
-const connectSSE = (chunkId: string = 'demo') => {
+const connectSSE = () => {
   if (abortController) {
     abortController.abort()
   }
@@ -94,7 +95,7 @@ const connectSSE = (chunkId: string = 'demo') => {
     return
   }
 
-  const url = `${API_BASE_URL}/v1/spectate/stream?chunk_id=${chunkId}`
+  const url = `${API_BASE_URL}/v1/owner/stream?agent_id=${debugMoveAgentId.value}`
   
   fetchEventSource(url, {
     method: 'GET',
@@ -126,6 +127,16 @@ const connectSSE = (chunkId: string = 'demo') => {
           currentChunk.value = data.chunk_id
           grid.value = data.grid || Array(50).fill(Array(50).fill(0))
           neighbors.value = data.neighbors || {}
+          
+          if (data.resource_nodes) {
+            goldNodes.value = data.resource_nodes.map((n: any) => ({
+              ...n,
+              remaining: n.max_remaining
+            }))
+          } else {
+            goldNodes.value = []
+          }
+
           if (data.render_hint?.debug_move_default_agent_id) {
             debugMoveAgentId.value = data.render_hint.debug_move_default_agent_id
           }
@@ -136,27 +147,15 @@ const connectSSE = (chunkId: string = 'demo') => {
           agents.value = data.agents || []
           npcs.value = data.npcs || []
           
-          const player = agents.value.find((a: any) => a.id === debugMoveAgentId.value) || 
-                         npcs.value.find((n: any) => n.id === debugMoveAgentId.value);
-          
-          if (player) {
-            lastKnownPlayerPos.value = { x: player.x, y: player.y };
-          } else if (lastKnownPlayerPos.value) {
-            // Player vanished! Infer transition
-            const { x, y } = lastKnownPlayerPos.value;
-            let nextDir = null;
-            if (x >= 49) nextDir = 'E';
-            if (x <= 0) nextDir = 'W';
-            if (y <= 0) nextDir = 'N';
-            if (y >= 49) nextDir = 'S';
-
-            if (nextDir && neighbors.value[nextDir]) {
-              addLog(`Target vanished at edge ${nextDir}. Switching to ${neighbors.value[nextDir]}...`);
-              setTimeout(() => connectSSE(neighbors.value[nextDir] as string), 100);
-            } else {
-              addLog(`Target vanished at (${x},${y}), but no known neighbor / not at edge.`);
-            }
-            lastKnownPlayerPos.value = null; // clear after triggering
+          if (data.resources) {
+            // merge live resource states into static nodes
+            data.resources.forEach((liveNode: any) => {
+              const node = goldNodes.value.find(n => n.node_id === liveNode.node_id)
+              if (node) {
+                node.remaining = liveNode.remaining
+                if (liveNode.state) node.state = liveNode.state
+              }
+            })
           }
 
           if (data.events && data.events.length > 0) {
@@ -169,10 +168,17 @@ const connectSSE = (chunkId: string = 'demo') => {
           const transAgentId = data.agent_id || data.payload?.agent_id;
           const transToChunkId = data.to_chunk_id || data.payload?.to_chunk_id;
           if (transAgentId === debugMoveAgentId.value) {
-            addLog(`Following [${debugMoveAgentId.value}] to ${transToChunkId}...`)
-            setTimeout(() => connectSSE(transToChunkId), 100)
+            addLog(`Received chunk_transition to ${transToChunkId}. Map will naturally re-render when new chunk_static arrives.`)
+            // The stream STAYS OPEN and auto-follows. No need to reconnect.
+            // We can optionally clear the grid to show a transition blip
+            grid.value = []
           } else {
             addLog(`Agent [${transAgentId || 'unknown'}] transitioned to ${transToChunkId || 'unknown'}`)
+          }
+        } else if (data.type === 'agent_private_delta') {
+          const transAgentId = data.agent_id || data.payload?.agent_id;
+          if (transAgentId === debugMoveAgentId.value && data.payload?.inventory) {
+            inventory.value = data.payload.inventory
           }
         } else if (data.type === 'resync_required') {
           addLog(`Resync required. Fetching snapshot...`)
@@ -311,9 +317,13 @@ const handleCellClick = async (x: number, y: number) => {
 
 const initSpectatorSession = async () => {
   try {
-    addLog('Requesting dev spectator session token...')
-    const res = await fetch(`${API_BASE_URL}/v1/dev/spectator-session`, {
-      method: 'POST'
+    addLog('Requesting dev owner spectator session token...')
+    const res = await fetch(`${API_BASE_URL}/v1/dev/owner-session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ agent_id: debugMoveAgentId.value })
     })
     if (res.ok) {
       const data = await res.json()
@@ -367,6 +377,14 @@ onUnmounted(() => {
             </div>
           </div>
           
+          <!-- Dynamic Gold Node Layer (Absolute Positioning, below NPCs) -->
+          <div v-for="node in goldNodes.filter(n => isVisible(n.x, n.y))" :key="node.node_id"
+               class="resource-marker"
+               :style="{ left: `${(node.x - viewportBounds.startX) * getCellWidth()}%`, top: `${(node.y - viewportBounds.startY) * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
+            <div class="resource-sprite gold-node" :class="{ depleted: node.remaining === 0 }"></div>
+            <span class="resource-amount">{{ node.remaining }}</span>
+          </div>
+          
           <!-- Dynamic NPC Layer (Absolute Positioning, below Agents) -->
           <div v-for="npc in npcs.filter(n => isVisible(n.x, n.y))" :key="npc.id" 
                class="agent-marker npc-marker"
@@ -402,9 +420,19 @@ onUnmounted(() => {
           <h3>Agent Status</h3>
           <div class="agent-stats" v-if="agents.length > 0">
             <div v-for="agent in agents" :key="agent.id" class="agent-card" :class="{ 'me': agent.id === debugMoveAgentId }">
-              <div class="stat"><span class="label">ID</span><span class="value">{{ agent.id }}</span></div>
-              <div class="stat"><span class="label">HP</span><span class="value">{{ agent.hp }}</span></div>
+              <div class="card-header">
+                <span class="label">ID</span><span class="value">{{ agent.id }}</span>
+              </div>
+              <div class="stat"><span class="label">State</span><span class="value status-badge">{{ agent.activity_state || 'idle' }}</span></div>
               <div class="stat"><span class="label">Pos</span><span class="value">(x:{{ agent.x }}, y:{{ agent.y }})</span></div>
+              
+              <!-- Private Inventory Section (Only for ME) -->
+              <div class="agent-inventory" v-if="agent.id === debugMoveAgentId && inventory.gold !== undefined">
+                <div class="inventory-item">
+                  <span class="inv-icon">🪙</span>
+                  <span class="inv-count">{{ inventory.gold }}</span>
+                </div>
+              </div>
             </div>
           </div>
           <div class="agent-stats empty-state" v-else>
@@ -537,15 +565,17 @@ onUnmounted(() => {
   position: relative;
   overflow: hidden;
   box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+  container-type: size; /* Treat map container as size container */
 }
 /* Grid Rendering */
 .world-grid {
   display: flex;
   flex-direction: column;
-  width: 100%;
-  height: 100%;
-  max-width: 100vmin; /* Keep it square-ish relative to viewport */
-  max-height: 100vmin;
+  /* Use container's min dimension to force a perfect square */
+  width: 100cqmin;
+  height: 100cqmin;
+  max-width: 100%;
+  max-height: 100%;
   aspect-ratio: 1 / 1;
   background-color: #151822; /* Default off-map color if visible */
   border: 1px solid #3b4252;
@@ -580,11 +610,11 @@ onUnmounted(() => {
 }
 /* 32x32 Stone Wall Texture */
 .grid-cell.wall {
-  background-image: url('@/assets/wall.svg');
+  background-image: url('../assets/wall.svg');
 }
 /* 32x32 Dirt Floor Texture */
 .grid-cell.empty {
-  background-image: url('@/assets/floor.svg');
+  background-image: url('../assets/floor.svg');
 }
 
 /* Agent & NPC rendering layer */
@@ -602,26 +632,56 @@ onUnmounted(() => {
   z-index: 9; /* Render below agents if on same cell */
 }
 .agent-sprite {
-  width: 70%;
-  height: 70%;
-  background-color: #00d2ff;
+  width: 100%; height: 100%;
   border-radius: 50%;
-  box-shadow: 0 0 10px rgba(0, 210, 255, 0.6);
-  animation: float 2s ease-in-out infinite, pulse-glow 2s infinite alternate;
+  background-color: #00d2ff;
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.5);
+  transition: transform 0.2s;
 }
 .player-marker .agent-sprite {
   background-color: #ffaa00;
-  box-shadow: 0 0 10px rgba(255, 170, 0, 0.8);
-}
-.player-marker .agent-name {
-  color: #ffaa00;
+  box-shadow: 0 0 15px rgba(255, 170, 0, 0.8);
+  transform: scale(1.15);
 }
 .npc-sprite {
   background-color: #00ff88;
-  box-shadow: 0 0 10px rgba(0, 255, 136, 0.6);
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
   border-radius: 20%; /* different shape for npc */
   animation: float 2.5s ease-in-out infinite alternate;
 }
+
+/* Resources */
+.resource-marker {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+}
+.gold-node {
+  width: 80%;
+  height: 80%;
+  background-image: url('../assets/gold.svg');
+  background-size: cover;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 5px rgba(255, 215, 0, 0.5));
+}
+.gold-node.depleted {
+  filter: grayscale(100%) opacity(40%);
+}
+.resource-amount {
+  position: absolute;
+  bottom: -10px;
+  font-size: 0.6rem;
+  font-family: monospace;
+  font-weight: bold;
+  color: #ffd700;
+  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+}
+
+/* Floating Events */
 .agent-name {
   position: absolute;
   top: -15px;
@@ -784,7 +844,7 @@ onUnmounted(() => {
   gap: 0.5rem;
 }
 .agent-card {
-  background: rgba(255,255,255,0.03);
+  background: rgba(255,255,255,0.02);
   padding: 0.75rem;
   border-radius: 6px;
   border-left: 3px solid #00d2ff;
@@ -793,6 +853,44 @@ onUnmounted(() => {
   border-left-color: #ffaa00;
   background: rgba(255, 170, 0, 0.05);
 }
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+.status-badge {
+  background: rgba(0, 255, 136, 0.1);
+  color: #00ff88;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.agent-inventory {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed rgba(255,255,255,0.1);
+  display: flex;
+}
+.inventory-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255, 215, 0, 0.1);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 215, 0, 0.2);
+}
+.inv-icon {
+  font-size: 0.9rem;
+}
+.inv-count {
+  font-weight: bold;
+  color: #ffd700;
+  font-family: monospace;
+}
+
 .empty-state {
   color: #5c677d;
   font-size: 0.9rem;
