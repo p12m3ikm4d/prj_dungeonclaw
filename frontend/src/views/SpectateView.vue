@@ -166,11 +166,13 @@ const connectSSE = (chunkId: string = 'demo') => {
             })
           }
         } else if (data.type === 'chunk_transition') {
-          if (data.payload?.agent_id === debugMoveAgentId.value) {
-            addLog(`Following [${debugMoveAgentId.value}] to ${data.payload?.to_chunk_id}...`)
-            setTimeout(() => connectSSE(data.payload?.to_chunk_id), 100)
+          const transAgentId = data.agent_id || data.payload?.agent_id;
+          const transToChunkId = data.to_chunk_id || data.payload?.to_chunk_id;
+          if (transAgentId === debugMoveAgentId.value) {
+            addLog(`Following [${debugMoveAgentId.value}] to ${transToChunkId}...`)
+            setTimeout(() => connectSSE(transToChunkId), 100)
           } else {
-            addLog(`Agent [${data.payload?.agent_id || 'unknown'}] transitioned to ${data.payload?.to_chunk_id || 'unknown'}`)
+            addLog(`Agent [${transAgentId || 'unknown'}] transitioned to ${transToChunkId || 'unknown'}`)
           }
         } else if (data.type === 'resync_required') {
           addLog(`Resync required. Fetching snapshot...`)
@@ -324,25 +326,7 @@ const initSpectatorSession = async () => {
   return false
 }
 
-const handleKeyDown = (e: KeyboardEvent) => {
-  if (!isConnected.value || !spectatorToken.value) return;
-  const player = agents.value.find((a: any) => a.id === debugMoveAgentId.value) || 
-                 npcs.value.find((n: any) => n.id === debugMoveAgentId.value);
-  if (!player) return;
-
-  let dx = 0; let dy = 0;
-  if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') dy = -1;
-  else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') dy = 1;
-  else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') dx = -1;
-  else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') dx = 1;
-
-  if (dx !== 0 || dy !== 0) {
-    handleCellClick(player.x + dx, player.y + dy);
-  }
-}
-
 onMounted(async () => {
-  window.addEventListener('keydown', handleKeyDown);
   addLog('Initializing spectator stream...')
   const success = await initSpectatorSession()
   if (success) {
@@ -351,7 +335,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeyDown);
   if (abortController) {
     abortController.abort()
   }
@@ -445,7 +428,11 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  height: 100%;
+  height: 100vh;
+  max-height: 100vh;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 1rem;
 }
 /* Top Status bar */
 .status-panel {

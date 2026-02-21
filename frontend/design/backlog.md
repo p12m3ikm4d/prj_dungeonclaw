@@ -34,3 +34,8 @@
 - [x] 임시 SVG 타일 이미지를 별도 에셋 파일(`frontend/src/assets/wall.svg`, `floor.svg`)로 완전 분리.
 - [x] **버그 픽스**: 제어 대상이 청크 경계 밖으로 이동하여 `chunk_delta`에서 사라질 경우(Spectator에게 `chunk_transition` 이벤트가 직접 오지 않는 한계 우회), 증발 직전 좌표와 `neighbors` 데이터를 대조해 대상이 이동한 새 청크로 SSE를 자동 전환하도록 방향 추론 로직 구현.
 - [x] **UX 보완**: 마우스 클릭 외에도 손쉽게 맵 끝(청크 경계)으로 이동해 전환을 테스트할 수 있도록 WASD 및 방향키(Arrow keys) 키보드 조작 기능 추가.
+
+## Sprint 8: Fixes & Cleanup
+- [x] **CSS 수정**: `spectate-view` 컨테이너 높이를 `100vh`로 제한해 시스템 로그가 무한히 커지며 스크롤바를 유발하는 현상 수정
+- [x] **버그 픽스**: 제어 대상이 경계를 넘을 때 백엔드에서 발송하는 `chunk_transition` 이벤트의 데이터 구조 오버라이딩(`data.to_chunk_id`) 오류 수정하여 최상위 필드 파싱 적용
+- [x] **Cleanup**: 관전자 목적에 어색한 키보드(`WASD`/방향키) 수동 이동 기능(`handleKeyDown`) 전면 삭제
