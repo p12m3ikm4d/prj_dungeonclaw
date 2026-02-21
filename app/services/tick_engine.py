@@ -246,6 +246,8 @@ class InMemoryTickEngine:
                     if not chunk.agents:
                         chunk.last_player_left_at = self._clock()
 
+            self._reset_world_if_idle_locked()
+
     async def has_active_command(self, agent_id: str) -> bool:
         async with self._lock:
             return agent_id in self._agent_active_cmd
@@ -522,6 +524,7 @@ class InMemoryTickEngine:
                 )
 
             self._run_chunk_gc(now=self._clock())
+            self._reset_world_if_idle_locked()
 
     async def has_chunk(self, chunk_id: str) -> bool:
         async with self._lock:
@@ -583,6 +586,38 @@ class InMemoryTickEngine:
             self._spectator_listeners.pop(chunk_id, None)
             self._spectator_history.pop(chunk_id, None)
             self._spectator_seq.pop(chunk_id, None)
+
+    def _reset_world_if_idle_locked(self) -> None:
+        if self._agents:
+            return
+
+        root = self._chunks.get(self._root_chunk_id)
+        if root is None:
+            return
+        if root.transition_lock_count > 0:
+            return
+
+        stale_chunk_ids = [
+            chunk_id
+            for chunk_id in self._chunks.keys()
+            if chunk_id != self._root_chunk_id
+        ]
+        for chunk_id in stale_chunk_ids:
+            self._push_spectator_event(
+                chunk_id=chunk_id,
+                event="chunk_closed",
+                data={
+                    "type": "chunk_closed",
+                    "chunk_id": chunk_id,
+                    "tick": self._tick,
+                },
+            )
+            self._chunks.pop(chunk_id, None)
+            self._spectator_listeners.pop(chunk_id, None)
+            self._spectator_history.pop(chunk_id, None)
+            self._spectator_seq.pop(chunk_id, None)
+
+        root.neighbors = {direction: None for direction in self.DIRECTIONS}
 
     def _attempt_boundary_transition(
         self,

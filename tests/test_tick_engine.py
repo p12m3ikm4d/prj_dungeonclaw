@@ -270,6 +270,25 @@ class TickEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["chunk_static"]["chunk_id"], "chunk-0")
         self.assertEqual(snapshot["latest_delta"]["chunk_id"], "chunk-0")
 
+    async def test_world_resets_to_chunk0_when_all_agents_leave(self) -> None:
+        engine = InMemoryTickEngine(tick_hz=5, width=6, height=6)
+        await engine.ensure_agent("a1")
+        await engine.submit_move_command(
+            agent_id="a1",
+            server_cmd_id="cmd-reset",
+            target_x=5,
+            target_y=1,
+        )
+        for _ in range(5):
+            await engine.tick_once()
+
+        self.assertGreaterEqual(await engine.chunk_count(), 2)
+        await engine.remove_agent("a1")
+        self.assertEqual(await engine.chunk_count(), 1)
+
+        static_payload = await engine.chunk_static_payload(chunk_id="chunk-0")
+        self.assertEqual(static_payload["neighbors"], {"N": None, "E": None, "S": None, "W": None})
+
 
 if __name__ == "__main__":
     unittest.main()
