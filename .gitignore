@@ -1,6 +1,8 @@
 # Local environment
 .venv/
 .agent/
+__pycache__/
+*.pyc
 
 # Deployment private data and machine-specific settings
 deploy/private/*
