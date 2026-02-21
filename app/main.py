@@ -13,6 +13,16 @@ app.include_router(http_router)
 app.include_router(ws_agent_router)
 
 
+@app.on_event("startup")
+async def on_startup() -> None:
+    await app.state.services.tick_engine.start()
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    await app.state.services.tick_engine.stop()
+
+
 @app.get("/")
 async def root() -> dict:
     return {

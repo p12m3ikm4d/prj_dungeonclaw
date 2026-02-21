@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     challenge_expires_seconds: int = 5
     challenge_ttl_seconds: int = 10
     challenge_default_difficulty: int = 2
+    tick_hz: int = 5
+    chunk_width: int = 50
+    chunk_height: int = 50
 
 
 @lru_cache(maxsize=1)

@@ -1,11 +1,13 @@
+import asyncio
 import secrets
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.schemas.ws import CommandAnswerPayload, CommandReqPayload, WsEnvelope
 from app.services.auth_store import AuthError
 from app.services.container import ServiceContainer
+from app.services.tick_engine import TickEngineError
 
 router = APIRouter()
 
@@ -19,6 +21,24 @@ def _extract_bearer_token(websocket: WebSocket) -> str:
 
 async def _send(websocket: WebSocket, message_type: str, payload: Dict[str, Any]) -> None:
     await websocket.send_json({"type": message_type, "payload": payload})
+
+
+async def _wait_for_client_or_engine(
+    websocket: WebSocket,
+    event_queue: asyncio.Queue,
+) -> Tuple[str, Dict[str, Any]]:
+    recv_task = asyncio.create_task(websocket.receive_json())
+    event_task = asyncio.create_task(event_queue.get())
+    done, pending = await asyncio.wait({recv_task, event_task}, return_when=asyncio.FIRST_COMPLETED)
+
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    if recv_task in done:
+        return "client", recv_task.result()
+    return "engine", event_task.result()
 
 
 @router.websocket("/v1/agent/ws")
@@ -36,6 +56,9 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
         await websocket.close(code=1008)
         return
 
+    await services.tick_engine.ensure_agent(agent_id)
+    event_queue = await services.tick_engine.register_listener(agent_id)
+
     pending_commands: Dict[str, Dict[str, Any]] = {}
 
     await _send(
@@ -47,10 +70,16 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
             "role": "agent",
         },
     )
+    await _send(websocket, "chunk_static", await services.tick_engine.chunk_static_payload())
+    await _send(websocket, "chunk_delta", await services.tick_engine.chunk_delta_payload())
 
     try:
         while True:
-            raw = await websocket.receive_json()
+            source, raw = await _wait_for_client_or_engine(websocket, event_queue)
+            if source == "engine":
+                await websocket.send_json(raw)
+                continue
+
             envelope = WsEnvelope.model_validate(raw)
 
             if envelope.type == "ping":
@@ -59,6 +88,30 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
 
             if envelope.type == "command_req":
                 req = CommandReqPayload.model_validate(envelope.payload)
+
+                if pending_commands:
+                    await _send(
+                        websocket,
+                        "command_ack",
+                        {
+                            "server_cmd_id": "",
+                            "accepted": False,
+                            "reason": "busy",
+                        },
+                    )
+                    continue
+
+                if await services.tick_engine.has_active_command(agent_id):
+                    await _send(
+                        websocket,
+                        "command_ack",
+                        {
+                            "server_cmd_id": "",
+                            "accepted": False,
+                            "reason": "busy",
+                        },
+                    )
+                    continue
 
                 cmd_type = req.cmd.get("type")
                 if cmd_type not in {"move_to", "say"}:
@@ -73,19 +126,6 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
                     )
                     continue
 
-                temp_server_cmd = f"busy_{agent_id}"
-                if not services.auth_store.acquire_agent_lock(agent_id, temp_server_cmd):
-                    await _send(
-                        websocket,
-                        "command_ack",
-                        {
-                            "server_cmd_id": "",
-                            "accepted": False,
-                            "reason": "busy",
-                        },
-                    )
-                    continue
-
                 challenge = services.challenge_service.issue(
                     agent_id=agent_id,
                     session_jti=session.jti,
@@ -93,8 +133,6 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
                     client_cmd_id=req.client_cmd_id,
                     cmd=req.cmd,
                 )
-                services.auth_store.release_agent_lock(agent_id, temp_server_cmd)
-                services.auth_store.acquire_agent_lock(agent_id, challenge.server_cmd_id)
 
                 pending_commands[challenge.server_cmd_id] = {
                     "cmd": req.cmd,
@@ -144,7 +182,6 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
                 )
 
                 if not verify.ok:
-                    services.auth_store.release_agent_lock(agent_id, answer.server_cmd_id)
                     pending_commands.pop(answer.server_cmd_id, None)
                     await _send(
                         websocket,
@@ -157,34 +194,80 @@ async def agent_ws(websocket: WebSocket, agent_id: str) -> None:
                     )
                     continue
 
+                cmd_payload = pending["cmd"]
+                if cmd_payload.get("type") == "say":
+                    await _send(
+                        websocket,
+                        "command_ack",
+                        {
+                            "server_cmd_id": answer.server_cmd_id,
+                            "accepted": True,
+                            "echo": cmd_payload,
+                            "started_tick": services.tick_engine.tick,
+                        },
+                    )
+                    await _send(
+                        websocket,
+                        "command_result",
+                        {
+                            "server_cmd_id": answer.server_cmd_id,
+                            "status": "completed",
+                            "ended_tick": services.tick_engine.tick,
+                        },
+                    )
+                    pending_commands.pop(answer.server_cmd_id, None)
+                    continue
+
+                try:
+                    started_tick = await services.tick_engine.submit_move_command(
+                        agent_id=agent_id,
+                        server_cmd_id=answer.server_cmd_id,
+                        target_x=int(cmd_payload.get("x", -1)),
+                        target_y=int(cmd_payload.get("y", -1)),
+                    )
+                except (ValueError, TypeError):
+                    pending_commands.pop(answer.server_cmd_id, None)
+                    await _send(
+                        websocket,
+                        "command_ack",
+                        {
+                            "server_cmd_id": answer.server_cmd_id,
+                            "accepted": False,
+                            "reason": "invalid_cmd",
+                        },
+                    )
+                    continue
+                except TickEngineError as exc:
+                    pending_commands.pop(answer.server_cmd_id, None)
+                    await _send(
+                        websocket,
+                        "command_ack",
+                        {
+                            "server_cmd_id": answer.server_cmd_id,
+                            "accepted": False,
+                            "reason": exc.reason,
+                        },
+                    )
+                    continue
+
                 await _send(
                     websocket,
                     "command_ack",
                     {
                         "server_cmd_id": answer.server_cmd_id,
                         "accepted": True,
-                        "echo": pending["cmd"],
-                        "started_tick": 0,
+                        "echo": cmd_payload,
+                        "started_tick": started_tick,
                     },
                 )
 
-                await _send(
-                    websocket,
-                    "command_result",
-                    {
-                        "server_cmd_id": answer.server_cmd_id,
-                        "status": "completed",
-                        "ended_tick": 0,
-                    },
-                )
-
-                services.auth_store.release_agent_lock(agent_id, answer.server_cmd_id)
                 pending_commands.pop(answer.server_cmd_id, None)
                 continue
 
             await _send(websocket, "error", {"reason": "unsupported_message_type"})
 
     except WebSocketDisconnect:
-        for server_cmd_id in list(pending_commands.keys()):
-            services.auth_store.release_agent_lock(agent_id, server_cmd_id)
         return
+    finally:
+        await services.tick_engine.unregister_listener(agent_id, event_queue)
+        await services.tick_engine.remove_agent(agent_id)
