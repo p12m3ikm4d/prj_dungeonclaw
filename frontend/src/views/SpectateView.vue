@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 
 const isConnected = ref(false)
-const events = ref<string[]>([])
+const events = ref<{ id: number; time: string; msg: string }[]>([])
 const eventLogRef = ref<HTMLElement | null>(null)
 
 // Simulation State
@@ -11,6 +11,7 @@ const currentChunk = ref<string>('Unknown')
 const currentTick = ref<number>(0)
 const grid = ref<number[][]>([])
 const agents = ref<any[]>([])
+const floatingEvents = ref<any[]>([])
 
 let abortController: AbortController | null = null
 // lastEventId is tracked by fetchEventSource internally, but we can keep a ref if we need it for UI
@@ -27,7 +28,11 @@ const scrollToBottom = async () => {
 }
 
 const addLog = (msg: string) => {
-  events.value.push(msg)
+  events.value.push({
+    id: Date.now() + Math.random(),
+    time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    msg
+  })
   if (events.value.length > 100) events.value.shift()
   scrollToBottom()
 }
@@ -75,7 +80,10 @@ const connectSSE = (chunkId: string = 'demo') => {
           currentTick.value = data.tick
           agents.value = data.agents || []
           if (data.events && data.events.length > 0) {
-            data.events.forEach((ev: any) => addLog(JSON.stringify(ev)))
+            data.events.forEach((ev: any) => {
+              addLog(JSON.stringify(ev))
+              handleFloatingEvent(ev)
+            })
           }
         } else if (data.type === 'chunk_transition') {
           addLog(`Agent transition to ${data.payload?.to_chunk_id}`)
@@ -128,10 +136,45 @@ const fetchSnapshot = async (snapshotUrl: string) => {
   }
 }
 
-// Quick helper
-const getAgentsAt = (x: number, y: number) => {
-  return agents.value.filter(a => a.x === x && a.y === y)
+const handleFloatingEvent = (ev: any) => {
+  let targetX, targetY, type, text;
+
+  if (ev.type === 'chat') {
+    // Find agent pos
+    const agent = agents.value.find(a => a.id === ev.from)
+    if (agent) {
+      targetX = agent.x
+      targetY = agent.y
+    }
+    type = 'chat'
+    text = ev.text
+  } else if (ev.type === 'blocked') {
+    targetX = ev.at?.x
+    targetY = ev.at?.y
+    type = 'blocked'
+    text = 'BLOCKED'
+  }
+
+  if (targetX !== undefined && targetY !== undefined) {
+    const eventId = Date.now() + Math.random()
+    floatingEvents.value.push({
+      id: eventId,
+      x: targetX,
+      y: targetY,
+      type,
+      text
+    })
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+      floatingEvents.value = floatingEvents.value.filter(e => e.id !== eventId)
+    }, 3000)
+  }
 }
+
+// Quick helper
+const getCellWidth = () => 100 / (grid.value[0]?.length || 50);
+const getCellHeight = () => 100 / (grid.value.length || 50);
 
 onMounted(() => {
   addLog('Initializing spectator stream...')
@@ -160,12 +203,28 @@ onUnmounted(() => {
     <div class="content-area">
       <div class="map-container">
         <div v-if="grid.length > 0" class="world-grid">
+          <!-- Static Background Grid -->
           <div v-for="(row, y) in grid" :key="`row-${y}`" class="grid-row">
             <div v-for="(cell, x) in row" :key="`cell-${x}-${y}`" 
                  class="grid-cell" 
                  :class="{ 'wall': cell === 1, 'empty': cell === 0 }">
-                 <div v-if="getAgentsAt(x, y).length > 0" class="agent-marker"></div>
             </div>
+          </div>
+          
+          <!-- Dynamic Agents Layer (Absolute Positioning) -->
+          <div v-for="agent in agents" :key="agent.id" 
+               class="agent-marker"
+               :style="{ left: `${agent.x * getCellWidth()}%`, top: `${agent.y * getCellHeight()}%`, width: `${getCellWidth()}%`, height: `${getCellHeight()}%` }">
+            <div class="agent-sprite"></div>
+            <span class="agent-name">{{ agent.name || agent.id.substring(0,4) }}</span>
+          </div>
+
+          <!-- Dynamic Events Layer (Absolute Positioning) -->
+          <div v-for="ev in floatingEvents" :key="ev.id"
+               class="floating-event"
+               :class="ev.type"
+               :style="{ left: `${ev.x * getCellWidth()}%`, top: `${ev.y * getCellHeight()}%` }">
+            {{ ev.text }}
           </div>
         </div>
         <div v-else class="placeholder-map">
@@ -190,10 +249,10 @@ onUnmounted(() => {
         
         <div class="panel-section event-log">
           <h3>System Log</h3>
-          <div class="log-scroll">
-            <div v-for="(ev, idx) in events" :key="idx" class="log-item">
-              <span class="log-indicator"></span>
-              <span class="log-msg">{{ ev }}</span>
+          <div class="log-scroll" ref="eventLogRef">
+            <div v-for="ev in events" :key="ev.id" class="log-item">
+              <span class="log-time">[{{ ev.time }}]</span>
+              <span class="log-msg">{{ ev.msg }}</span>
             </div>
           </div>
         </div>
@@ -286,6 +345,7 @@ onUnmounted(() => {
   aspect-ratio: 1 / 1;
   background-color: #151822;
   border: 1px solid #3b4252;
+  position: relative; /* Essential for absolute overlay layers */
 }
 .grid-row {
   display: flex;
@@ -295,10 +355,7 @@ onUnmounted(() => {
   flex: 1;
   border-right: 1px solid rgba(255,255,255,0.02);
   border-bottom: 1px solid rgba(255,255,255,0.02);
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  box-sizing: border-box;
 }
 .grid-cell.wall {
   background-color: #2d313f;
@@ -306,18 +363,84 @@ onUnmounted(() => {
 .grid-cell.empty {
   background-color: transparent;
 }
+
+/* Agent rendering layer */
 .agent-marker {
-  width: 80%;
-  height: 80%;
+  position: absolute;
+  transition: left 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), top 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+}
+.agent-sprite {
+  width: 70%;
+  height: 70%;
   background-color: #00d2ff;
   border-radius: 50%;
-  box-shadow: 0 0 8px rgba(0, 210, 255, 0.8);
-  animation: float 2s ease-in-out infinite;
-  z-index: 10;
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.6);
+  animation: float 2s ease-in-out infinite, pulse-glow 2s infinite alternate;
 }
+.agent-name {
+  position: absolute;
+  top: -15px;
+  background: rgba(0,0,0,0.6);
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+/* Floating Events */
+.floating-event {
+  position: absolute;
+  z-index: 20;
+  transform: translate(-50%, -100%);
+  margin-top: -10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  white-space: nowrap;
+  animation: float-up 3s forwards;
+  pointer-events: none;
+}
+.floating-event.chat {
+  background-color: #fff;
+  color: #000;
+  border: 1px solid #ccc;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+.floating-event.chat::after {
+  content: '';
+  position: absolute;
+  bottom: -4px; left: 50%; transform: translateX(-50%);
+  border-width: 4px 4px 0; border-style: solid;
+  border-color: #fff transparent transparent;
+}
+.floating-event.blocked {
+  background-color: #ff3366;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(255, 51, 102, 0.8);
+}
+
 @keyframes float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-10%); }
+}
+@keyframes pulse-glow {
+  from { box-shadow: 0 0 5px rgba(0, 210, 255, 0.4); }
+  to { box-shadow: 0 0 15px rgba(0, 210, 255, 1); }
+}
+@keyframes float-up {
+  0% { transform: translate(-50%, -10px); opacity: 0; }
+  10% { transform: translate(-50%, -20px); opacity: 1; }
+  80% { transform: translate(-50%, -40px); opacity: 1; }
+  100% { transform: translate(-50%, -50px); opacity: 0; }
 }
 
 .placeholder-map {
@@ -401,16 +524,15 @@ onUnmounted(() => {
   display: flex;
   gap: 0.5rem;
   align-items: flex-start;
-  padding: 0.25rem 0.5rem;
+  padding: 0.35rem 0.5rem;
   background: rgba(255,255,255,0.02);
   border-radius: 4px;
 }
-.log-indicator {
-  margin-top: 0.35rem;
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: #00d2ff;
+.log-time {
+  color: #5c677d;
   flex-shrink: 0;
+  font-size: 0.75rem;
+  margin-top: 0.1rem;
 }
-.log-msg { color: #a6accd; word-break: break-all; line-height: 1.4; }
+.log-msg { color: #a6accd; word-break: break-word; line-height: 1.4; flex: 1; }
 </style>
