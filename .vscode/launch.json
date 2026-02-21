@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "msedge",
+            "request": "launch",
+            "name": "Launch Frontend (Edge)",
+            "url": "http://localhost:5173",
+            "webRoot": "${workspaceFolder}/frontend",
+            "preLaunchTask": "npm: dev"
+        },
+        {
+            "type": "chrome",
+            "request": "launch",
+            "name": "Launch Frontend (Chrome)",
+            "url": "http://localhost:5173",
+            "webRoot": "${workspaceFolder}/frontend",
+            "preLaunchTask": "npm: dev"
+        }
+    ]
+}
