@@ -33,8 +33,33 @@ class SpectatorApiTests(unittest.TestCase):
             self.assertIn("render_hint", chunk_static)
             self.assertEqual(chunk_static["render_hint"]["cell_codes"], {"0": "floor", "1": "wall"})
             self.assertEqual(chunk_static["render_hint"]["npc_overlay"], "chunk_delta.npcs")
+            self.assertEqual(chunk_static["render_hint"]["debug_move_default_agent_id"], "demo-player")
             self.assertIn("agents", snap_payload["latest_delta"])
             self.assertIn("npcs", snap_payload["latest_delta"])
+            center_x = chunk_static["size"]["w"] // 2
+            center_y = chunk_static["size"]["h"] // 2
+            demo_player = None
+            for item in snap_payload["latest_delta"]["agents"]:
+                if item["id"] == "demo-player":
+                    demo_player = item
+                    break
+            self.assertIsNotNone(demo_player)
+            assert demo_player is not None
+            self.assertEqual((demo_player["x"], demo_player["y"]), (center_x, center_y))
+            demo_users = [
+                item
+                for item in snap_payload["latest_delta"]["agents"]
+                if str(item["id"]).startswith("demo-user-")
+            ]
+            demo_npcs = [
+                item
+                for item in snap_payload["latest_delta"]["npcs"]
+                if str(item["id"]).startswith("demo-npc-")
+            ]
+            self.assertGreaterEqual(len(demo_users), 2)
+            self.assertGreaterEqual(len(demo_npcs), 2)
+            for item in demo_users + demo_npcs:
+                self.assertEqual(chunk_static["grid"][item["y"]][item["x"]], 0)
 
             legacy_snapshot = client.get("/api/v1/chunks/chunk-0/snapshot", headers=headers)
             self.assertEqual(legacy_snapshot.status_code, 200)

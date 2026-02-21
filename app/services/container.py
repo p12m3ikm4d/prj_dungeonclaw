@@ -27,5 +27,6 @@ def build_container(settings: Settings) -> ServiceContainer:
             height=settings.chunk_height,
             chunk_gc_ttl_seconds=settings.chunk_gc_ttl_seconds,
             sse_replay_max_events=settings.sse_replay_max_events,
+            enable_demo_actors=settings.demo_actors_enabled,
         ),
     )

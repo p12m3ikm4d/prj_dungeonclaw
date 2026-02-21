@@ -240,7 +240,7 @@ challenge 세부 전략은 `./design/challenge-strategy.md`를 기준으로 구�
 
 - URL: `POST /v1/dev/agent/move-to`
 - Header: `Authorization: Bearer <session_token or test-spectator-token>`
-- Body: `{ "agent_id": "debug-agent", "x": 3, "y": 1 }`
+- Body: `{ "agent_id": "demo-player", "x": 3, "y": 1 }`
 - Response:
   - `accepted=true`: `started_tick` 반환
   - `accepted=false`: `reason` 반환(`out_of_bounds`, `unreachable`, `blocked` 등)
@@ -325,7 +325,8 @@ Event ID 포맷:
   "render_hint": {
     "cell_codes": { "0": "floor", "1": "wall" },
     "agent_overlay": "chunk_delta.agents",
-    "npc_overlay": "chunk_delta.npcs"
+    "npc_overlay": "chunk_delta.npcs",
+    "debug_move_default_agent_id": "demo-player"
   },
   "neighbors": { "N": null, "E": "chunk-def", "S": null, "W": null },
   "tick_base": 3810
@@ -337,6 +338,7 @@ Rules:
 - `grid`는 렌더 우선 기준이며 `0=floor`, `1=wall`로 해석한다.
 - NPC 표시는 `chunk_delta.npcs[]`를 `grid` 위에 오버레이한다.
 - 유저 표시는 `chunk_delta.agents[]`를 `grid` 위에 오버레이한다.
+- dev demo 제어 대상 id는 `render_hint.debug_move_default_agent_id`로 확인한다.
 - `neighbors` 키는 `N/E/S/W`만 허용.
 
 ### 6.2 `chunk_delta`
@@ -504,3 +506,4 @@ Lock rule:
 | 2026-02-21 | Codex | 개발 환경에서 임시 고정 테스트 관전자 토큰 허용 정책을 추가 | 3.1 |
 | 2026-02-21 | Codex | 프론트 디버그를 위한 dev move-to 우회 경로와 wall/floor/user 렌더 기준(grid/overlay)을 명시 | 2.1, 3.2, 4.9, 5.1, 6.1 |
 | 2026-02-21 | Codex | NPC 오버레이 필드와 청크 렌더 전용 계약 문서 참조를 추가 | 6.1, 6.2 |
+| 2026-02-21 | Codex | demo-player 고정 ID와 debug 기본 제어 ID(render_hint)를 계약에 추가 | 4.9, 6.1 |

@@ -20,11 +20,17 @@ class Settings(BaseSettings):
     chunk_gc_ttl_seconds: int = 60
     sse_replay_max_events: int = 300
     sse_keepalive_seconds: int = 15
+    enable_demo_actors: bool = True
 
     @property
     def dev_spectator_session_enabled(self) -> bool:
         env = self.environment.lower()
         return self.enable_dev_spectator_session and env not in {"prod", "production"}
+
+    @property
+    def demo_actors_enabled(self) -> bool:
+        env = self.environment.lower()
+        return self.enable_demo_actors and env not in {"prod", "production"}
 
 
 @lru_cache(maxsize=1)

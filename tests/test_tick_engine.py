@@ -254,7 +254,7 @@ class TickEngineTests(unittest.IsolatedAsyncioTestCase):
         await engine.unregister_spectator_listener("chunk-0", resync_feed["queue"])
 
     async def test_chunk_snapshot_returns_static_and_latest_delta(self) -> None:
-        engine = InMemoryTickEngine(tick_hz=5, width=10, height=10)
+        engine = InMemoryTickEngine(tick_hz=5, width=10, height=10, enable_demo_actors=True)
         await engine.ensure_agent("a1")
         await engine.submit_move_command(
             agent_id="a1",
@@ -273,9 +273,16 @@ class TickEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("render_hint", snapshot["chunk_static"])
         self.assertEqual(snapshot["chunk_static"]["render_hint"]["cell_codes"], {"0": "floor", "1": "wall"})
         self.assertEqual(snapshot["chunk_static"]["render_hint"]["npc_overlay"], "chunk_delta.npcs")
+        self.assertEqual(
+            snapshot["chunk_static"]["render_hint"]["debug_move_default_agent_id"],
+            "demo-player",
+        )
         self.assertIn("agents", snapshot["latest_delta"])
         self.assertIn("npcs", snapshot["latest_delta"])
-        self.assertEqual(snapshot["latest_delta"]["npcs"], [])
+        self.assertTrue(
+            any(str(item["id"]).startswith("demo-npc-") for item in snapshot["latest_delta"]["npcs"])
+        )
+        self.assertTrue(any(str(item["id"]) == "demo-player" for item in snapshot["latest_delta"]["agents"]))
 
     async def test_world_resets_to_chunk0_when_all_agents_leave(self) -> None:
         engine = InMemoryTickEngine(tick_hz=5, width=6, height=6)

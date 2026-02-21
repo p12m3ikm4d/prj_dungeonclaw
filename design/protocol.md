@@ -138,6 +138,7 @@ WS/SSE JSON payload 공통 envelope:
 - endpoint: `POST /v1/dev/agent/move-to`
 - 입력: `{agent_id:string, x:int, y:int}`
 - 인증: `Bearer <session_token or test-spectator-token>`
+- dev demo 기본 제어 대상 id는 `demo-player`를 사용한다.
 - 의미: challenge handshake 없이 서버 tick 엔진에 이동 명령을 직접 enqueue
 - 제한: `environment != prod`, 디버그 메뉴에서만 사용
 
@@ -168,7 +169,8 @@ WS/SSE JSON payload 공통 envelope:
   "render_hint": {
     "cell_codes": { "0": "floor", "1": "wall" },
     "agent_overlay": "chunk_delta.agents",
-    "npc_overlay": "chunk_delta.npcs"
+    "npc_overlay": "chunk_delta.npcs",
+    "debug_move_default_agent_id": "demo-player"
   },
   "neighbors": { "N": null, "E": "chunk-def", "S": null, "W": null },
   "tick_base": 3810
@@ -288,3 +290,4 @@ WS/SSE JSON payload 공통 envelope:
 | 2026-02-21 | Codex | 개발 환경 임시 테스트 토큰(`test-spectator-token`) 허용 정책을 추가 | 11 |
 | 2026-02-21 | Codex | 디버그 move-to 경로와 wall/floor/user 렌더 기준(grid + agents overlay), demo chunk 정규화를 추가 | 2, 5.3, 7.1, 9, 11 |
 | 2026-02-21 | Codex | NPC 오버레이(`chunk_delta.npcs`)와 렌더 전용 계약 문서 참조를 추가 | 7.1, 7.2 |
+| 2026-02-21 | Codex | demo-player 고정 ID와 debug 기본 제어 ID(render_hint)를 프로토콜에 추가 | 5.3, 7.1 |

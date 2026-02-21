@@ -45,6 +45,10 @@
 - 레거시 호환 경로: `GET /api/v1/spectate/stream?chunk_id=demo`
 - 스냅샷: `GET /v1/chunks/demo/snapshot` (또는 `/api/v1/chunks/demo/snapshot`)
 - 백엔드는 `chunk_id=demo`를 기본 청크(`chunk-0`)로 해석한다.
+- `chunk-0`은 중앙 원형 홀 + 동/서/남/북 4방향(폭 4셀) 고정 출구 구조를 사용한다.
+- 데모 플레이어(내 캐릭터) id는 `demo-player`로 고정이며, 초기 좌표는 `chunk-0` 중앙이다.
+- 기본 제어 대상 id는 `chunk_static.render_hint.debug_move_default_agent_id`로 확인한다.
+- dev demo 렌더 검증용으로 `demo-user-*`, `demo-npc-*` 엔티티가 포함될 수 있다.
 
 ### 3.3 디버그 클릭 이동 (challenge 생략 경로)
 
@@ -57,7 +61,7 @@
 
 ```json
 {
-  "agent_id": "debug-agent",
+  "agent_id": "demo-player",
   "x": 3,
   "y": 1
 }

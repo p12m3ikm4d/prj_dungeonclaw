@@ -28,6 +28,7 @@
 - `render_hint.cell_codes: { "0": "floor", "1": "wall" }`
 - `render_hint.agent_overlay: "chunk_delta.agents"`
 - `render_hint.npc_overlay: "chunk_delta.npcs"`
+- `render_hint.debug_move_default_agent_id: "demo-player"` (dev demo 제어 대상)
 
 규칙:
 
@@ -66,6 +67,9 @@
 - 데모 스냅샷: `GET /v1/chunks/demo/snapshot`
 - 레거시 호환 경로: `/api/v1/spectate/stream`, `/api/v1/chunks/{chunk_id}/snapshot`
 - 서버는 `chunk_id=demo`를 기본 청크(`chunk-0`)로 정규화한다.
+- `chunk-0`은 중앙 원형 홀 + 동/서/남/북 4방향(폭 4셀) 고정 출구 레이아웃을 사용한다.
+- 데모 플레이어 id는 `demo-player`로 고정되고, 초기 위치는 `chunk-0` 중앙이다.
+- 개발 환경 demo 청크에서는 렌더 검증을 위해 `demo-user-*`, `demo-npc-*` 엔티티가 포함될 수 있다.
 - 개발 디버그 클릭 이동: `POST /v1/dev/agent/move-to`, body=`{ "agent_id": "...", "x": int, "y": int }`
 
 ## 6. 변경 규칙
@@ -78,3 +82,4 @@
 | Date | Author | Summary | Impacted Sections |
 |---|---|---|---|
 | 2026-02-21 | Codex | 벽/땅/유저/npc 렌더 계약을 별도 문서로 분리하고 demo/debug 연동 규칙을 고정 | All |
+| 2026-02-21 | Codex | demo-player 고정 스폰(중앙)과 debug 기본 제어 ID 규약을 추가 | 3.1, 5 |

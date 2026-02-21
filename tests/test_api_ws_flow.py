@@ -15,6 +15,35 @@ def _find_pow_nonce(nonce: str, cmd_hash: str, difficulty: int) -> str:
         probe += 1
 
 
+def _pick_target_from_stream(static_payload: dict, delta_payload: dict, agent_id: str) -> tuple[int, int]:
+    grid = static_payload["payload"]["grid"]
+    me = None
+    for item in delta_payload["payload"]["agents"]:
+        if item["id"] == agent_id:
+            me = item
+            break
+    if me is None:
+        raise AssertionError("agent_not_found_in_delta")
+
+    width = len(grid[0])
+    height = len(grid)
+    x0 = int(me["x"])
+    y0 = int(me["y"])
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (2, 0), (-2, 0), (0, 2), (0, -2)):
+        x = x0 + dx
+        y = y0 + dy
+        if not (0 <= x < width and 0 <= y < height):
+            continue
+        if grid[y][x] == 0:
+            return x, y
+
+    for y in range(height):
+        for x in range(width):
+            if grid[y][x] == 0 and (x, y) != (x0, y0):
+                return x, y
+    raise AssertionError("no_walkable_target")
+
+
 class ApiWsFlowTests(unittest.TestCase):
     def test_dev_spectator_session_and_cors_preflight(self) -> None:
         with TestClient(app) as client:
@@ -51,10 +80,12 @@ class ApiWsFlowTests(unittest.TestCase):
 
     def test_dev_agent_move_to_without_challenge(self) -> None:
         with TestClient(app) as client:
+            target_x = app.state.settings.chunk_width // 2
+            target_y = app.state.settings.chunk_height // 2
             response = client.post(
                 "/v1/dev/agent/move-to",
                 headers={"authorization": "Bearer test-spectator-token"},
-                json={"agent_id": "debug-agent", "x": 3, "y": 1},
+                json={"agent_id": "debug-agent-a", "x": target_x, "y": target_y},
             )
             self.assertEqual(response.status_code, 200)
             payload = response.json()
@@ -64,10 +95,12 @@ class ApiWsFlowTests(unittest.TestCase):
 
     def test_dev_agent_move_to_legacy_alias(self) -> None:
         with TestClient(app) as client:
+            target_x = app.state.settings.chunk_width // 2
+            target_y = app.state.settings.chunk_height // 2
             response = client.post(
                 "/api/v1/dev/agent/move-to",
                 headers={"authorization": "Bearer test-spectator-token"},
-                json={"agent_id": "debug-agent", "x": 3, "y": 1},
+                json={"agent_id": "debug-agent-b", "x": target_x, "y": target_y},
             )
             self.assertEqual(response.status_code, 200)
             payload = response.json()
@@ -77,7 +110,7 @@ class ApiWsFlowTests(unittest.TestCase):
         with TestClient(app) as client:
             response = client.post(
                 "/v1/dev/agent/move-to",
-                json={"agent_id": "debug-agent", "x": 3, "y": 1},
+                json={"agent_id": "debug-agent-c", "x": 3, "y": 1},
             )
             self.assertEqual(response.status_code, 401)
 
@@ -122,12 +155,19 @@ class ApiWsFlowTests(unittest.TestCase):
                     static_msg["payload"]["render_hint"]["npc_overlay"],
                     "chunk_delta.npcs",
                 )
+                self.assertEqual(
+                    static_msg["payload"]["render_hint"]["debug_move_default_agent_id"],
+                    "demo-player",
+                )
                 delta_msg = ws.receive_json()
                 self.assertEqual(delta_msg["type"], "chunk_delta")
                 self.assertIn("npcs", delta_msg["payload"])
-                self.assertEqual(delta_msg["payload"]["npcs"], [])
+                self.assertTrue(
+                    any(str(item["id"]).startswith("demo-npc-") for item in delta_msg["payload"]["npcs"])
+                )
 
-                cmd = {"type": "move_to", "x": 2, "y": 1}
+                target_x, target_y = _pick_target_from_stream(static_msg, delta_msg, "agent-1")
+                cmd = {"type": "move_to", "x": target_x, "y": target_y}
                 ws.send_json(
                     {
                         "type": "command_req",

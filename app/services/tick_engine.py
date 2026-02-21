@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -55,6 +56,7 @@ class TickEngineError(Exception):
 class InMemoryTickEngine:
     DIRECTIONS = ("N", "E", "S", "W")
     OPPOSITE_DIR = {"N": "S", "E": "W", "S": "N", "W": "E"}
+    DEMO_PLAYER_ID = "demo-player"
 
     def __init__(
         self,
@@ -63,6 +65,7 @@ class InMemoryTickEngine:
         height: int = 50,
         chunk_gc_ttl_seconds: int = 60,
         sse_replay_max_events: int = 300,
+        enable_demo_actors: bool = False,
         clock: Optional[Callable[[], float]] = None,
     ) -> None:
         self.tick_hz = tick_hz
@@ -85,11 +88,15 @@ class InMemoryTickEngine:
         self._spectator_listeners: Dict[str, Set[asyncio.Queue]] = {}
         self._spectator_history: Dict[str, Deque[Dict[str, Any]]] = {}
         self._spectator_seq: Dict[str, int] = {}
+        self._enable_demo_actors = enable_demo_actors
+        self._demo_overlays: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
 
-        root = self._new_chunk("chunk-0", pinned=True)
+        root = self._new_chunk("chunk-0", pinned=True, required_edges=set(self.DIRECTIONS))
         self._root_chunk_id = root.chunk_id
         self._chunks: Dict[str, ChunkState] = {root.chunk_id: root}
         self._ensure_spectator_chunk(root.chunk_id)
+        if self._enable_demo_actors:
+            self._demo_overlays[root.chunk_id] = self._build_demo_overlays(root)
 
         self._lock = asyncio.Lock()
         self._task: Optional[asyncio.Task] = None
@@ -341,6 +348,75 @@ class InMemoryTickEngine:
         ]
         agents.sort(key=lambda item: item["id"])
         return agents
+
+    def _build_demo_overlays(self, chunk: ChunkState) -> Dict[str, List[Dict[str, Any]]]:
+        if chunk.chunk_id != self._root_chunk_id:
+            return {"agents": [], "npcs": []}
+
+        rng = random.Random(chunk.seed ^ 0xA11CEB00)
+        center = (chunk.width // 2, chunk.height // 2)
+        candidates: List[Cell] = []
+        for y in range(1, chunk.height - 1):
+            for x in range(1, chunk.width - 1):
+                if not self._is_walkable(chunk, x, y):
+                    continue
+                if (x, y) == center:
+                    continue
+                if abs(x - 1) + abs(y - 1) < 6:
+                    continue
+                candidates.append((x, y))
+
+        if len(candidates) < 6:
+            for y in range(chunk.height):
+                for x in range(chunk.width):
+                    if not self._is_walkable(chunk, x, y):
+                        continue
+                    cell = (x, y)
+                    if cell not in candidates:
+                        candidates.append(cell)
+
+        rng.shuffle(candidates)
+        user_cells = candidates[:2]
+        npc_cells = candidates[2:5]
+
+        demo_agents: List[Dict[str, Any]] = []
+        if self._is_walkable(chunk, center[0], center[1]):
+            demo_agents.append(
+                {
+                    "id": self.DEMO_PLAYER_ID,
+                    "name": "You",
+                    "x": center[0],
+                    "y": center[1],
+                    "is_demo": True,
+                    "is_primary_demo": True,
+                }
+            )
+
+        for idx, (x, y) in enumerate(user_cells, start=1):
+            demo_agents.append(
+                {
+                    "id": f"demo-user-{idx}",
+                    "name": f"DemoUser{idx}",
+                    "x": x,
+                    "y": y,
+                    "is_demo": True,
+                }
+            )
+
+        npc_kinds = ["slime", "bat", "skeleton"]
+        demo_npcs: List[Dict[str, Any]] = []
+        for idx, (x, y) in enumerate(npc_cells, start=1):
+            demo_npcs.append(
+                {
+                    "id": f"demo-npc-{idx}",
+                    "kind": npc_kinds[(idx - 1) % len(npc_kinds)],
+                    "x": x,
+                    "y": y,
+                    "is_demo": True,
+                }
+            )
+
+        return {"agents": demo_agents, "npcs": demo_npcs}
 
     async def chunk_static_payload(
         self,
@@ -782,11 +858,34 @@ class InMemoryTickEngine:
             self._emit_to_agent(agent_id, {"type": "chunk_delta", "payload": payload})
 
     def _build_chunk_delta_payload(self, chunk: ChunkState, *, events: List[Dict[str, Any]]) -> Dict[str, Any]:
+        agents = self._agent_snapshots(chunk)
+        occupied = {(int(item["x"]), int(item["y"])) for item in agents}
+
+        npcs: List[Dict[str, Any]] = []
+        if self._enable_demo_actors:
+            overlays = self._demo_overlays.get(chunk.chunk_id)
+            if overlays is None:
+                overlays = self._build_demo_overlays(chunk)
+                self._demo_overlays[chunk.chunk_id] = overlays
+
+            for item in overlays.get("agents", []):
+                cell = (int(item["x"]), int(item["y"]))
+                if cell in occupied:
+                    continue
+                agents.append(dict(item))
+            agents.sort(key=lambda item: str(item["id"]))
+
+            for item in overlays.get("npcs", []):
+                cell = (int(item["x"]), int(item["y"]))
+                if cell in occupied:
+                    continue
+                npcs.append(dict(item))
+
         return {
             "chunk_id": chunk.chunk_id,
             "tick": self._tick,
-            "agents": self._agent_snapshots(chunk),
-            "npcs": [],
+            "agents": agents,
+            "npcs": npcs,
             "events": list(events),
         }
 
@@ -932,6 +1031,7 @@ class InMemoryTickEngine:
             height=self.height,
             seed=chunk_seed,
             required_edges=required_edges or set(),
+            root_layout=(chunk_id == "chunk-0"),
         )
         return ChunkState(
             chunk_id=chunk_id,
@@ -958,6 +1058,7 @@ class InMemoryTickEngine:
                 "cell_codes": {"0": "floor", "1": "wall"},
                 "agent_overlay": "chunk_delta.agents",
                 "npc_overlay": "chunk_delta.npcs",
+                "debug_move_default_agent_id": self.DEMO_PLAYER_ID,
             },
             "neighbors": dict(chunk.neighbors),
             "tick_base": self._tick,
